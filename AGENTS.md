@@ -1,0 +1,106 @@
+# Edji — contexto para agentes
+
+## Manutenção deste arquivo
+
+Este é um documento vivo. Leia-o antes de trabalhar neste repositório e atualize-o na mesma mudança sempre que surgir ou mudar uma estrutura, decisão relevante, convenção ou lembrete importante. Mantenha o conteúdo conciso, atual e verificável; remova orientações superadas e diferencie decisões aceitas de hipóteses e questões em aberto. Não registre segredos ou dados pessoais.
+
+## Objetivo
+
+Construir um assistente pessoal para celular que rode localmente o máximo possível. A funcionalidade central é ativar o modo de voz pelo botão lateral (ligar/desligar), falar um comando e receber a resposta sem abrir o app.
+
+### MVP
+
+App **Android** com uma lista de tarefas:
+
+1. O usuário segura o botão de ligar/desligar.
+2. O Edji abre o reconhecimento de voz (STT) no aparelho.
+3. O texto transcrito vira um item novo na lista, salvo localmente, com uma confirmação curta (visual ou háptica).
+4. A tela do app exibe a lista.
+
+No MVP, o texto falado inteiro vira a tarefa; não há interpretação de intenção. Fora do MVP: listar, concluir ou editar por voz; outros comandos (lembretes, agenda, notas, perguntas abertas); iOS.
+
+Critério de aceite proposto: num Android real configurado com o Edji como assistente padrão, segurar o botão, dizer "comprar pão" e ver "comprar pão" na lista ao abrir o app, sem rede.
+
+## Estado do projeto
+
+- Fase de planejamento. O repositório tem apenas documentação (`README.md`, `CONTRIBUTING.md`, este arquivo e o brandbook em `docs/references/`) e a `LICENSE`.
+- Nenhuma stack foi escolhida e não há código. Não descreva funcionalidades como implementadas sem evidência.
+
+## Hipótese crítica: ativação pelo botão lateral
+
+Toda a proposta depende disso, e ainda não foi validado em aparelho real.
+
+- **Android (alvo inicial).** A documentação oficial descreve uma sessão de voz iniciada ao segurar o botão de ligar, que ativa o `VoiceInteractionService` atual, escolhido pelo usuário; o app precisa ocupar o papel `android.app.role.ASSISTANT` (implementando `VoiceInteractionService` ou tratando `ACTION_ASSIST`). A sessão recebe `SHOW_SOURCE_PUSH_TO_TALK` quando vem de um botão físico. Referências: [VoiceInteractionService](https://developer.android.com/reference/android/service/voice/VoiceInteractionService), [VoiceInteractionSession](https://developer.android.com/reference/android/service/voice/VoiceInteractionSession), [RoleManager](https://developer.android.com/reference/android/app/role/RoleManager).
+  - A validar: se o gesto chega ao app em Pixel e em fabricantes com botão customizado (ex.: Samsung com Bixby, Xiaomi); versão mínima do Android; se dá para pedir o papel via `RoleManager` ou só pelas configurações; latência entre o toque e o microfone aberto; comportamento com a tela bloqueada.
+  - **Samsung (aparelho de teste: Galaxy S26 Ultra).** Desde a One UI 7, Configurações → Recursos avançados → Botão lateral → Pressionar e manter → **Assistente digital** abre o assistente padrão, e há relatos de apps de terceiros (ChatGPT, Alexa) aparecendo como opção no ícone de engrenagem ([SamMobile](https://www.sammobile.com/news/galaxy-z-flip-fold-6-one-ui-7-beta-3-gemini-side-button/), [suporte Samsung](https://www.samsung.com/ie/support/mobile-devices/how-to-customise-the-side-button-with-new-features-on-your-galaxy-phone-and-tablet/)). Com isso, o menu de desligar sai do botão lateral e fica no painel rápido ou em lateral + volume para baixo. Alternativa a avaliar, se o Edji não aparecer na lista: **pressionar duas vezes → Abrir app**, apontando para uma atividade de voz do Edji.
+- **iOS.** O botão lateral é da Siri. O equivalente mais próximo é o Action Button (modelos recentes), que pode disparar um App Shortcut definido com App Intents. Referências: [App Intents: tornar ações descobríveis](https://developer.apple.com/documentation/appintents/making-actions-and-content-discoverable-and-widely-available), [WWDC25: Get to know App Intents](https://developer.apple.com/videos/play/wwdc2025/244/).
+  - A validar: se o intent consegue abrir captura de voz direto, funcionar com a tela bloqueada e se isso basta como experiência. Siri + App Intents é outra alternativa.
+
+## Roteiro proposto
+
+Sem calendário. Cada etapa só conta como concluída com evidência em aparelho real.
+
+1. **Spike de ativação (Android).** App mínimo que vira assistente padrão e, ao segurar o botão, abre o microfone e mostra o texto transcrito. Registrar aparelhos testados e resultado em `docs/decisions/`.
+2. **Decisão da stack.** Confirmar ou rever a proposta abaixo com base no spike. Registrar ADR.
+3. **MVP.** Texto transcrito vira item da lista; persistência local; tela que exibe a lista.
+4. **Depois do MVP.** Mais comandos por voz (listar, concluir), interpretação de intenção e iOS (Action Button/App Intents).
+
+## Stack
+
+**Proposta preferida, ainda não decidida:** núcleo em Rust com camadas nativas finas, ligadas por [UniFFI](https://mozilla.github.io/uniffi-rs/), que gera os bindings Kotlin e Swift.
+
+```
+core/ (Rust: tarefas, persistência, futuramente STT/LLM locais)
+  ├─ UniFFI → Android (Kotlin: serviço de assistente, sessão de voz, tela da lista)
+  └─ UniFFI → iOS (Swift: App Intent/Action Button, tela) — depois do MVP
+```
+
+Motivos: a integração com o botão é nativa em qualquer stack (Kotlin no Android, Swift no iOS); a lógica fica compartilhada e testável com `cargo test`; bibliotecas locais em C/C++ (whisper.cpp, llama.cpp, SQLite) se integram bem ao Rust; o time já conhece Rust.
+
+Alternativas consideradas:
+
+- **Kotlin Multiplatform:** Android sem ponte e lógica compartilhada com iOS. Boa alternativa se o núcleo em Rust mostrar atrito no Android.
+- **Tauri 2 (mobile):** reaproveita React e Rust, mas a sessão de voz teria que ser nativa de qualquer forma (o serviço de assistente vive fora da webview) e abrir uma webview no gesto aumenta a latência. Ainda pode servir para a tela da lista no futuro.
+- **Flutter / React Native:** compartilham tela e lógica, mas exigem módulos nativos para o assistente nas duas plataformas.
+
+## Questões em aberto
+
+- **Interface Android:** Jetpack Compose (proposta) ou Views.
+- **STT no aparelho:** reconhecimento on-device do Android (`SpeechRecognizer`), whisper.cpp ou Vosk. Critérios: português, latência, tamanho do modelo e funcionamento offline. Para o MVP, o reconhecimento do sistema pode bastar se funcionar offline.
+- **Persistência:** SQLite no núcleo Rust, com esquema versionado, ou Room no Android para o MVP.
+- **Interpretação de comandos (pós-MVP):** regras simples ou modelo de linguagem local. Avaliar bateria, memória e tamanho do app.
+- **Confirmação:** háptica, visual ou TTS do sistema.
+- **Nuvem opcional:** se existir, como opt-in explícito e desligado por padrão.
+
+## Princípios
+
+- **Local e privado.** Áudio, transcrições e tarefas ficam no aparelho por padrão. Nenhuma chamada de rede sem opt-in explícito e documentado.
+- **Resposta rápida.** Medir o tempo entre o gesto e o microfone aberto, e entre o fim da fala e a confirmação.
+- **Falhas claras.** Comando não entendido, microfone negado ou papel de assistente ausente devem gerar mensagens compreensíveis e um caminho para resolver.
+- **Testes.** Toda melhoria vem com um teste de regressão que cubra o comportamento alterado. A interpretação de comandos deve ter testes com frases de exemplo em português. Comportamento de hardware é verificado manualmente em aparelho real e registrado.
+- **Preservar dados.** Persistência versionada e migrações sem perda silenciosa.
+
+## Identidade e comunicação
+
+Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) para símbolo, paleta, tipografia, tom, estados da sessão de voz e feedback. É uma proposta de identidade; os mockups e a simulação de voz são demonstrativos, não o app implementado.
+
+- **Símbolo:** cinco barras simétricas mint sobre verde-pinho, com cantos arredondados. Sem microfone, checklist, sombra ou texto dentro do ícone. No Android adaptativo, as barras são o foreground e o verde-pinho o background; os SVGs de referência são gerados pelo próprio brandbook (seção Kit de marca).
+- **Paleta:** verde-pinho `#073E2B` (confiança, controles), mint `#78FF9B` (ação concluída, destaques), preto editorial `#152019`, papel `#F7F9F5`, névoa `#E8EFE8`, cinza orgânico `#6F7B72`. Mint só sobre superfícies escuras, formas e estados ativos; em fundo claro, use verde-pinho ou preto para texto. Confira o contraste real.
+- **Tipografia:** fonte do sistema no app (Roboto no Android), pesos 700–900 em títulos. O traço manuscrito é só decoração de marca, nunca texto essencial nem interface.
+- **Sessão de voz:** quatro estados, Pronto → Ouvindo... → Entendi. → Anotado., com retorno à tela anterior. Sem escuta contínua.
+- **Feedback:** háptica é o sinal principal (proposta: 20 ms ao iniciar a captura; 20 + 45 + 25 ms ao salvar). Som de confirmação opcional, menos de 300 ms, desligado por padrão.
+- **Tom:** português curto e direto ("Anotado.", "Não entendi. Pode repetir?"). Evite mensagens burocráticas ("Sua solicitação foi processada com sucesso!") e propaganda de IA.
+
+## Convenções
+
+- Código, identificadores e nomes de arquivos e pastas em inglês. Interface e documentação em português.
+- Documente módulos e APIs públicas em inglês, no padrão da linguagem escolhida.
+- Decisões arquiteturais vão em `docs/decisions/NNNN-titulo-curto.md` (contexto, alternativas, decisão, consequências). A pasta será criada com a primeira decisão.
+
+## Estrutura atual
+
+- `AGENTS.md`: contexto e instruções vivas do repositório.
+- `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
+- `README.md`: apresentação do projeto.
+- `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
+- `LICENSE`: licença Apache 2.0; preserve seu conteúdo.
