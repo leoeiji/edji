@@ -23,8 +23,8 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 
 ## Estado do projeto
 
-- Etapa 1 do roteiro concluída: o spike Android em `spikes/android-assistant/` funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: decisão da stack (etapa 2).
-- Nenhuma stack foi escolhida; o único código é o spike, que não é base do MVP. Não descreva funcionalidades como implementadas sem evidência.
+- Etapa 1 do roteiro concluída: o spike Android em `spikes/android-assistant/` funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
+- Stack e arquitetura de plugins decididas (ADRs 0002 e 0003); o app Expo ainda não existe. O único código é o spike, que não é base do MVP. Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
@@ -42,34 +42,41 @@ Toda a proposta depende disso. **Validado no Android em um aparelho** (Galaxy S2
 Sem calendário. Cada etapa só conta como concluída com evidência em aparelho real.
 
 1. **Spike de ativação (Android).** App mínimo que vira assistente padrão e, ao segurar o botão, abre o microfone e mostra o texto transcrito. Registrar aparelhos testados e resultado em `docs/decisions/`.
-2. **Decisão da stack.** Confirmar ou rever a proposta abaixo com base no spike. Registrar ADR.
-3. **MVP.** Texto transcrito vira item da lista; persistência local; tela que exibe a lista.
-4. **Depois do MVP.** Mais comandos por voz (listar, concluir), interpretação de intenção e iOS (Action Button/App Intents).
+2. ~~**Decisão da stack.**~~ Concluída: ADRs 0002 (stack) e 0003 (plugins).
+3. **Spike do caminho da voz.** Medir no S26, com o app fechado, "fim do STT → tool executado" usando Headless JS e a caixa de entrada de comandos. Registrar ADR.
+4. **MVP.** Casca Expo com aba lateral, registro de plugins e plugin `todo`; o texto transcrito vira item da lista pelo `todo.add`.
+5. **Depois do MVP.** Escolha do tool pela frase (listar, concluir), novos plugins (ex.: agenda) e iOS (Action Button/App Intents).
 
 ## Stack
 
-**Proposta preferida, ainda não decidida:** núcleo em Rust com camadas nativas finas, ligadas por [UniFFI](https://mozilla.github.io/uniffi-rs/), que gera os bindings Kotlin e Swift.
+**Decidido** ([ADR 0002](docs/decisions/0002-stack-react-native-expo.md)): app em **Expo (React Native, TypeScript)** com *development builds*; a sessão de voz é um módulo nativo local (`modules/edji-assistant`: Kotlin no Android, Swift no iOS depois), portado do spike; persistência em SQLite (`expo-sqlite`) num arquivo que o código nativo também acessa.
 
 ```
-core/ (Rust: tarefas, persistência, futuramente STT/LLM locais)
-  ├─ UniFFI → Android (Kotlin: serviço de assistente, sessão de voz, tela da lista)
-  └─ UniFFI → iOS (Swift: App Intent/Action Button, tela) — depois do MVP
+app (Expo, TypeScript): casca da interface, aba lateral, configurações, agente, registro de plugins
+  plugins/<id>/ (TypeScript): tools, interface da aba lateral, tabelas e migrações
+  modules/edji-assistant/
+    android/ (Kotlin): serviço de assistente, sessão de voz, STT on-device
+    ios/     (Swift): App Intent + Action Button, depois do MVP
+  SQLite compartilhado: plugins ligados, caixa de entrada de comandos, dados dos plugins
 ```
 
-Motivos: a integração com o botão é nativa em qualquer stack (Kotlin no Android, Swift no iOS); a lógica fica compartilhada e testável com `cargo test`; bibliotecas locais em C/C++ (whisper.cpp, llama.cpp, SQLite) se integram bem ao Rust; o time já conhece Rust.
+## Plugins
 
-Alternativas consideradas:
+Contrato completo na [ADR 0003](docs/decisions/0003-arquitetura-de-plugins.md).
 
-- **Kotlin Multiplatform:** Android sem ponte e lógica compartilhada com iOS. Boa alternativa se o núcleo em Rust mostrar atrito no Android.
-- **Tauri 2 (mobile):** reaproveita React e Rust, mas a sessão de voz teria que ser nativa de qualquer forma (o serviço de assistente vive fora da webview) e abrir uma webview no gesto aumenta a latência. Ainda pode servir para a tela da lista no futuro.
-- **Flutter / React Native:** compartilham tela e lógica, mas exigem módulos nativos para o assistente nas duas plataformas.
+- Plugin = módulo TypeScript de primeira parte em `plugins/<id>/`, compilado junto com o app; nada é carregado em tempo de execução.
+- Declara manifesto (`id`, nome, versão, ligado por padrão) e, opcionalmente, **tools** para o agente (`<id>.<ação>`, JSON Schema, handler TS com resposta curta) e uma **interface** na aba lateral.
+- Dados em tabelas com prefixo do plugin e migrações versionadas.
+- Desligar esconde a interface e tira os tools do registro, mas **preserva os dados**. O estado ligado/desligado fica no SQLite, legível pelo nativo sem JS.
+- O plugin `todo` é o primeiro: interface da lista e tools `todo.add`, `todo.list`, `todo.complete`. No MVP o agente só roteia a frase inteira para `todo.add`.
+- **Caminho da voz (hipótese, medir):** a sessão nativa abre o microfone sem JS, inicia um runtime JS em segundo plano enquanto o usuário fala, grava o texto numa caixa de entrada de comandos e o JS executa o tool. Se o JS não responder a tempo, o comando fica pendente e a sessão diz isso.
 
 ## Questões em aberto
 
-- **Interface Android:** Jetpack Compose (proposta) ou Views.
 - **STT no aparelho:** reconhecimento on-device do Android (`SpeechRecognizer`), whisper.cpp ou Vosk. Critérios: português, latência, tamanho do modelo e funcionamento offline. Para o MVP, o reconhecimento do sistema pode bastar se funcionar offline.
-- **Persistência:** SQLite no núcleo Rust, com esquema versionado, ou Room no Android para o MVP.
-- **Interpretação de comandos (pós-MVP):** regras simples ou modelo de linguagem local. Avaliar bateria, memória e tamanho do app.
+- **Acesso ao SQLite pelo nativo:** como o módulo Kotlin e o `expo-sqlite` compartilham o arquivo com segurança (caminho, WAL, concorrência).
+- **Escolha do tool (pós-MVP):** regras simples ou modelo de linguagem local com tool calling. Avaliar bateria, memória e tamanho do app.
+- **Tools a partir do iOS:** App Intents rodam em Swift; como executar tools TypeScript pelo Action Button.
 - **Confirmação:** háptica, visual ou TTS do sistema.
 - **Nuvem opcional:** se existir, como opt-in explícito e desligado por padrão.
 
@@ -104,7 +111,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
 - `spikes/android-assistant/`: spike descartável em Kotlin (AGP 9.4 com Kotlin embutido, Gradle 9.6 via wrapper, SDK 36, minSdk 31; Compose na tela do app, Views na sessão de voz). Valida o gesto, o STT on-device e as latências; o README traz os passos no aparelho e o checklist para o ADR. Lições do spike: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço. Não é base do MVP.
-- `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android (assistente digital + STT on-device).
+- `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins.
 - `.gitignore`: ignora artefatos de Gradle/Android, IDEs e `.worktree/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
 - `LICENSE`: licença Apache 2.0; preserve seu conteúdo.
