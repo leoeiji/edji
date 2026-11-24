@@ -12,7 +12,7 @@ O Edji vai crescer por funcionalidades independentes: lista de tarefas agora, ag
 
 ### O que é um plugin
 
-Um plugin é um módulo TypeScript **de primeira parte, compilado junto com o app**, em `plugins/<id>/`. Ele declara:
+Um plugin é um módulo TypeScript **de primeira parte, compilado junto com o app**, em `app/src/plugins/<id>/`. Ele declara:
 
 - **Manifesto:** `id` (ex.: `todo`), nome exibido, versão, se vem ligado por padrão.
 - **Tools (opcional):** ações para o agente, com nome no namespace do plugin (`todo.add`, `todo.list`, `todo.complete`), descrição, parâmetros em JSON Schema e um handler TypeScript que devolve uma resposta curta para a sessão ("Anotado.").
@@ -25,7 +25,7 @@ Plugins não são baixados nem carregados em tempo de execução. Carregar códi
 
 - Um plugin desligado some da aba lateral e seus tools saem do registro, então o agente não os oferece.
 - **Os dados ficam.** Desligar não apaga nada; religar volta ao mesmo estado. Apagar dados é uma ação separada e explícita.
-- O estado ligado/desligado fica no SQLite compartilhado, legível pelo código nativo sem JavaScript, para a sessão de voz saber se há algum plugin capaz de receber o comando. Se não houver, ela mostra uma mensagem clara em vez de gravar no vazio.
+- O estado ligado/desligado fica no banco do app (`edji.db`, tabela `plugin_state`). Se nenhum plugin ligado recebe comandos de voz, o agente responde com uma mensagem clara ("Nenhum plugin ligado recebe comandos de voz.") e a sessão a mostra.
 
 ### Agente
 
@@ -35,7 +35,7 @@ Um registro reúne os tools dos plugins ligados. **No MVP o agente é um roteado
 
 1. O gesto abre a sessão nativa, que abre o microfone sem JavaScript (~160 ms medidos na ADR 0001).
 2. Em paralelo, enquanto o usuário fala, a sessão inicia um runtime JS em segundo plano (Headless JS no Android).
-3. Ao fim do STT, a sessão grava o texto numa **caixa de entrada de comandos** no SQLite antes de qualquer outra coisa, para o comando nunca se perder.
+3. Ao fim do STT, a sessão grava o texto numa **caixa de entrada de comandos** antes de qualquer outra coisa, para o comando nunca se perder.
 4. O runtime JS lê a entrada, chama o agente, executa o tool e devolve a resposta; a sessão mostra "Anotado." e vibra.
 5. Se o JS não responder dentro de um prazo, a entrada fica pendente e é processada quando o app abrir. A sessão diz isso em vez de confirmar o que não aconteceu.
 
@@ -44,6 +44,13 @@ Ainda não se sabe se o runtime JS inicia rápido o bastante no S26 com o app fe
 ### Dependências nativas
 
 Um plugin pode usar um módulo nativo (ex.: um futuro plugin de agenda acessando o calendário do sistema). O módulo é um Expo Module à parte; o contrato do plugin não muda.
+
+### Dois bancos, sem arquivo compartilhado
+
+O `expo-sqlite` traz a própria cópia do SQLite, e o código nativo usaria a do Android. Duas cópias do SQLite no mesmo processo não podem abrir o mesmo arquivo: as travas POSIX de uma são desfeitas pela outra e o banco pode corromper ([sqlite.org/howtocorrupt](https://www.sqlite.org/howtocorrupt.html#multiple_copies_of_sqlite_linked_into_the_same_application)). Por isso:
+
+- **`edji-inbox.db`** é só do nativo (Android SQLite): a caixa de entrada de comandos. O JS a acessa pelas funções do módulo (`pendingCommands`, `completeCommand`).
+- **`edji.db`** é só do JS (`expo-sqlite`): estado dos plugins, versões de esquema e tabelas dos plugins.
 
 ## Consequências
 

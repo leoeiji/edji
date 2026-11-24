@@ -24,7 +24,7 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 ## Estado do projeto
 
 - Etapa 1 do roteiro concluída: o spike Android em `spikes/android-assistant/` funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
-- Stack e arquitetura de plugins decididas (ADRs 0002 e 0003); o app Expo ainda não existe. O único código é o spike, que não é base do MVP. Não descreva funcionalidades como implementadas sem evidência.
+- Stack e arquitetura de plugins decididas (ADRs 0002 e 0003). O app Expo em `app/` tem a casca, o núcleo de plugins, o plugin `todo` e o módulo nativo de voz com a caixa de entrada e Headless JS; testes unitários passam, mas o caminho da voz até o tool ainda não foi medido em aparelho (etapa 3). Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
@@ -49,32 +49,31 @@ Sem calendário. Cada etapa só conta como concluída com evidência em aparelho
 
 ## Stack
 
-**Decidido** ([ADR 0002](docs/decisions/0002-stack-react-native-expo.md)): app em **Expo (React Native, TypeScript)** com *development builds*; a sessão de voz é um módulo nativo local (`modules/edji-assistant`: Kotlin no Android, Swift no iOS depois), portado do spike; persistência em SQLite (`expo-sqlite`) num arquivo que o código nativo também acessa.
+**Decidido** ([ADR 0002](docs/decisions/0002-stack-react-native-expo.md)): app em **Expo (React Native, TypeScript)** com *development builds*; a sessão de voz é um módulo nativo local (`modules/edji-assistant`: Kotlin no Android, Swift no iOS depois), portado do spike; persistência em SQLite: `edji.db` só do JS (`expo-sqlite`) e `edji-inbox.db` só do nativo; nunca o mesmo arquivo pelos dois (ADR 0003).
 
 ```
 app (Expo, TypeScript): casca da interface, aba lateral, configurações, agente, registro de plugins
-  plugins/<id>/ (TypeScript): tools, interface da aba lateral, tabelas e migrações
+  src/plugins/<id>/ (TypeScript): tools, interface da aba lateral, tabelas e migrações
   modules/edji-assistant/
     android/ (Kotlin): serviço de assistente, sessão de voz, STT on-device
     ios/     (Swift): App Intent + Action Button, depois do MVP
-  SQLite compartilhado: plugins ligados, caixa de entrada de comandos, dados dos plugins
+  edji.db (JS): plugins ligados, esquemas, dados dos plugins · edji-inbox.db (nativo): caixa de entrada de comandos
 ```
 
 ## Plugins
 
 Contrato completo na [ADR 0003](docs/decisions/0003-arquitetura-de-plugins.md).
 
-- Plugin = módulo TypeScript de primeira parte em `plugins/<id>/`, compilado junto com o app; nada é carregado em tempo de execução.
+- Plugin = módulo TypeScript de primeira parte em `app/src/plugins/<id>/`, compilado junto com o app; nada é carregado em tempo de execução.
 - Declara manifesto (`id`, nome, versão, ligado por padrão) e, opcionalmente, **tools** para o agente (`<id>.<ação>`, JSON Schema, handler TS com resposta curta) e uma **interface** na aba lateral.
 - Dados em tabelas com prefixo do plugin e migrações versionadas.
-- Desligar esconde a interface e tira os tools do registro, mas **preserva os dados**. O estado ligado/desligado fica no SQLite, legível pelo nativo sem JS.
+- Desligar esconde a interface e tira os tools do registro, mas **preserva os dados**. O estado fica em `plugin_state` no `edji.db`.
 - O plugin `todo` é o primeiro: interface da lista e tools `todo.add`, `todo.list`, `todo.complete`. No MVP o agente só roteia a frase inteira para `todo.add`.
 - **Caminho da voz (hipótese, medir):** a sessão nativa abre o microfone sem JS, inicia um runtime JS em segundo plano enquanto o usuário fala, grava o texto numa caixa de entrada de comandos e o JS executa o tool. Se o JS não responder a tempo, o comando fica pendente e a sessão diz isso.
 
 ## Questões em aberto
 
 - **STT no aparelho:** reconhecimento on-device do Android (`SpeechRecognizer`), whisper.cpp ou Vosk. Critérios: português, latência, tamanho do modelo e funcionamento offline. Para o MVP, o reconhecimento do sistema pode bastar se funcionar offline.
-- **Acesso ao SQLite pelo nativo:** como o módulo Kotlin e o `expo-sqlite` compartilham o arquivo com segurança (caminho, WAL, concorrência).
 - **Escolha do tool (pós-MVP):** regras simples ou modelo de linguagem local com tool calling. Avaliar bateria, memória e tamanho do app.
 - **Tools a partir do iOS:** App Intents rodam em Swift; como executar tools TypeScript pelo Action Button.
 - **Confirmação:** háptica, visual ou TTS do sistema.
@@ -110,6 +109,12 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `AGENTS.md`: contexto e instruções vivas do repositório.
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
+- `app/`: app Expo (TypeScript). `npm test` (Jest) e `npm run typecheck`. Pastas `android/` e `ios/` são geradas por `npx expo prebuild` e ignoradas; nunca edite à mão.
+  - `App.tsx`: casca com aba lateral (views dos plugins ligados, Configurações, Registro). `index.ts` registra a task Headless JS `EdjiCommand`.
+  - `src/core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), agente (`agent.ts`, MVP roteia tudo para `todo.add`), banco e migrações (`db.ts`), execução da caixa de entrada (`runtime.ts`, `headless.ts`).
+  - `src/plugins/<id>/`: plugins; registre novos em `src/plugins/index.ts`. `todo`: tela, tools `todo.add`/`todo.list`/`todo.complete`, tabela `todo_items`.
+  - `src/ui/`: tema da marca, Configurações e Registro.
+  - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz, STT, caixa de entrada (`CommandInbox`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`).
 - `spikes/android-assistant/`: spike descartável em Kotlin (AGP 9.4 com Kotlin embutido, Gradle 9.6 via wrapper, SDK 36, minSdk 31; Compose na tela do app, Views na sessão de voz). Valida o gesto, o STT on-device e as latências; o README traz os passos no aparelho e o checklist para o ADR. Lições do spike: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço. Não é base do MVP.
 - `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins.
 - `.gitignore`: ignora artefatos de Gradle/Android, IDEs e `.worktree/`.
