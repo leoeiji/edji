@@ -23,15 +23,16 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 
 ## Estado do projeto
 
-- Fase de validação. Além da documentação, há o spike Android em `spikes/android-assistant/` (etapa 1 do roteiro): compila e passa nos testes unitários (`./gradlew testDebugUnitTest assembleDebug`), mas ainda não foi testado em aparelho. O aparelho de teste é um Galaxy S26 Ultra.
+- Etapa 1 do roteiro concluída: o spike Android em `spikes/android-assistant/` funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: decisão da stack (etapa 2).
 - Nenhuma stack foi escolhida; o único código é o spike, que não é base do MVP. Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
-Toda a proposta depende disso, e ainda não foi validado em aparelho real.
+Toda a proposta depende disso. **Validado no Android em um aparelho** (Galaxy S26 Ultra; ver ADR 0001). Outros fabricantes e o iOS seguem em aberto.
 
 - **Android (alvo inicial).** A documentação oficial descreve uma sessão de voz iniciada ao segurar o botão de ligar, que ativa o `VoiceInteractionService` atual, escolhido pelo usuário; o app precisa ocupar o papel `android.app.role.ASSISTANT` (implementando `VoiceInteractionService` ou tratando `ACTION_ASSIST`). A sessão recebe `SHOW_SOURCE_PUSH_TO_TALK` quando vem de um botão físico. Referências: [VoiceInteractionService](https://developer.android.com/reference/android/service/voice/VoiceInteractionService), [VoiceInteractionSession](https://developer.android.com/reference/android/service/voice/VoiceInteractionSession), [RoleManager](https://developer.android.com/reference/android/app/role/RoleManager).
-  - A validar: se o gesto chega ao app em Pixel e em fabricantes com botão customizado (ex.: Samsung com Bixby, Xiaomi); versão mínima do Android; se dá para pedir o papel via `RoleManager` ou só pelas configurações; latência entre o toque e o microfone aberto; comportamento com a tela bloqueada.
+  - Confirmado no S26: o gesto abre a sessão em cerca de 160 ms até o microfone, funciona com a tela bloqueada e sem rede. Na Samsung, o botão chega como `SHOW_SOURCE_ASSIST_GESTURE` (não `PUSH_TO_TALK`), com `invocation_type=6` nos `args`; não dependa de `PUSH_TO_TALK`.
+  - A validar: Pixel e Xiaomi; tela apagada; versão mínima do Android; se dá para pedir o papel via `RoleManager` ou só pelas configurações.
   - **Samsung (aparelho de teste: Galaxy S26 Ultra).** Desde a One UI 7, Configurações → Recursos avançados → Botão lateral → Pressionar e manter → **Assistente digital** abre o assistente padrão, e há relatos de apps de terceiros (ChatGPT, Alexa) aparecendo como opção no ícone de engrenagem ([SamMobile](https://www.sammobile.com/news/galaxy-z-flip-fold-6-one-ui-7-beta-3-gemini-side-button/), [suporte Samsung](https://www.samsung.com/ie/support/mobile-devices/how-to-customise-the-side-button-with-new-features-on-your-galaxy-phone-and-tablet/)). Com isso, o menu de desligar sai do botão lateral e fica no painel rápido ou em lateral + volume para baixo. Alternativa a avaliar, se o Edji não aparecer na lista: **pressionar duas vezes → Abrir app**, apontando para uma atividade de voz do Edji.
 - **iOS.** O botão lateral é da Siri. O equivalente mais próximo é o Action Button (modelos recentes), que pode disparar um App Shortcut definido com App Intents. Referências: [App Intents: tornar ações descobríveis](https://developer.apple.com/documentation/appintents/making-actions-and-content-discoverable-and-widely-available), [WWDC25: Get to know App Intents](https://developer.apple.com/videos/play/wwdc2025/244/).
   - A validar: se o intent consegue abrir captura de voz direto, funcionar com a tela bloqueada e se isso basta como experiência. Siri + App Intents é outra alternativa.
@@ -95,7 +96,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 
 - Código, identificadores e nomes de arquivos e pastas em inglês. Interface e documentação em português.
 - Documente módulos e APIs públicas em inglês, no padrão da linguagem escolhida.
-- Decisões arquiteturais vão em `docs/decisions/NNNN-titulo-curto.md` (contexto, alternativas, decisão, consequências). A pasta será criada com a primeira decisão.
+- Decisões arquiteturais vão em `docs/decisions/NNNN-titulo-curto.md` (contexto, alternativas, decisão, consequências).
 
 ## Estrutura atual
 
@@ -103,6 +104,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
 - `spikes/android-assistant/`: spike descartável em Kotlin (AGP 9.4 com Kotlin embutido, Gradle 9.6 via wrapper, SDK 36, minSdk 31; Compose na tela do app, Views na sessão de voz). Valida o gesto, o STT on-device e as latências; o README traz os passos no aparelho e o checklist para o ADR. Lições do spike: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço. Não é base do MVP.
+- `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android (assistente digital + STT on-device).
 - `.gitignore`: ignora artefatos de Gradle/Android, IDEs e `.worktree/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
 - `LICENSE`: licença Apache 2.0; preserve seu conteúdo.
