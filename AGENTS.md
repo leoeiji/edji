@@ -23,8 +23,8 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 
 ## Estado do projeto
 
-- Fase de planejamento. O repositório tem apenas documentação (`README.md`, `CONTRIBUTING.md`, este arquivo e o brandbook em `docs/references/`) e a `LICENSE`.
-- Nenhuma stack foi escolhida e não há código. Não descreva funcionalidades como implementadas sem evidência.
+- Fase de validação. Além da documentação, há o spike Android em `spikes/android-assistant/` (etapa 1 do roteiro): compila e passa nos testes unitários (`./gradlew testDebugUnitTest assembleDebug`), mas ainda não foi testado em aparelho. O aparelho de teste é um Galaxy S26 Ultra.
+- Nenhuma stack foi escolhida; o único código é o spike, que não é base do MVP. Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
@@ -102,5 +102,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `AGENTS.md`: contexto e instruções vivas do repositório.
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
+- `spikes/android-assistant/`: spike descartável em Kotlin (AGP 9.4 com Kotlin embutido, Gradle 9.6 via wrapper, SDK 36, minSdk 31; Compose na tela do app, Views na sessão de voz). Valida o gesto, o STT on-device e as latências; o README traz os passos no aparelho e o checklist para o ADR. Lições do spike: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço. Não é base do MVP.
+- `.gitignore`: ignora artefatos de Gradle/Android, IDEs e `.worktree/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
 - `LICENSE`: licença Apache 2.0; preserve seu conteúdo.

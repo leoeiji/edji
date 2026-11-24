@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Worktrees
+.worktree/

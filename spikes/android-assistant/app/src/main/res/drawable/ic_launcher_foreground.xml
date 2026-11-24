@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Five bars from Brandbook 01 (adaptive foreground, 108dp canvas, inside the 66dp safe zone). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M33.85,49.95 L33.85,58.05 M42.85,44.95 L42.85,63.05 M54,38.15 L54,69.85 M65.15,44.95 L65.15,63.05 M74.15,49.95 L74.15,58.05"
+        android:strokeWidth="5.5"
+        android:strokeColor="@color/edji_mint"
+        android:strokeLineCap="round" />
+</vector>
