@@ -1,11 +1,11 @@
 import type { PendingCommand } from '../../../modules/edji-assistant';
-import { runAgent } from '../agent';
+import { runAgent } from '@/agent/agent';
 import { messagesFor, processPendingCommands, WAITING_POLL_MS } from '../runtime';
 
 jest.mock('expo-sqlite', () => ({ openDatabaseAsync: jest.fn(async () => ({ execAsync: jest.fn(), getFirstAsync: jest.fn() })) }));
-jest.mock('../openrouter', () => ({ openRouterModel: jest.fn() }));
-jest.mock('../settings', () => ({ loadModelSettings: jest.fn(async () => ({ apiKey: 'k', model: 'autor/modelo' })) }));
-jest.mock('../agent', () => ({ runAgent: jest.fn() }));
+jest.mock('@/agent/openrouter', () => ({ openRouterModel: jest.fn() }));
+jest.mock('@/agent/settings', () => ({ loadModelSettings: jest.fn(async () => ({ apiKey: 'k', model: 'autor/modelo' })) }));
+jest.mock('@/agent/agent', () => ({ runAgent: jest.fn() }));
 
 const mockNative = {
   pendingCommands: jest.fn<Promise<PendingCommand[]>, []>(),

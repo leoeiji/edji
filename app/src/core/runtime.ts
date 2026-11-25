@@ -1,12 +1,12 @@
 import { EdjiAssistant, assistantLog, type PendingCommand } from '../../modules/edji-assistant';
-import { PLUGINS } from '../plugins';
-import { runAgent, type AgentResult, type ChatMessage } from './agent';
+import { PLUGINS } from '@/plugins';
+import { runAgent, type AgentResult, type ChatMessage } from '@/agent/agent';
 import { getDb, migratePlugins } from './db';
 import { emitChanged } from './events';
-import { openRouterModel } from './openrouter';
+import { openRouterModel } from '@/agent/openrouter';
 import type { PluginContext } from './plugin';
 import { validatePlugins } from './registry';
-import { loadModelSettings } from './settings';
+import { loadModelSettings } from '@/agent/settings';
 
 let ready: Promise<void> | null = null;
 

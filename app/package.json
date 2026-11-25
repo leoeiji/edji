@@ -38,6 +38,9 @@
     "preset": "jest-expo",
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|ai/|@ai-sdk/.*|@openrouter/.*|@workflow/.*|eventsource-parser|@standard-schema/.*|zod)"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    }
   }
 }

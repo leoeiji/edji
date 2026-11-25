@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { FlatList, Platform, StyleSheet, Text } from 'react-native';
 import { EdjiAssistant } from '../../modules/edji-assistant';
-import { useTheme } from './theme';
+import { useTheme } from '@/theme';
 
 /** Diagnostic log of the voice path (latencies, recognizer, inbox), newest first. */
-export function LogView() {
+export function LogScreen() {
   const t = useTheme();
   const [lines, setLines] = useState<string[]>(() => EdjiAssistant?.logLines().slice().reverse() ?? []);
 

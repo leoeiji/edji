@@ -18,7 +18,7 @@ Os princípios do projeto pedem que nada saia do aparelho sem opt-in explícito.
 
 ## Decisão
 
-- O agente (`app/src/core/agent.ts`) usa `streamText` do pacote `ai` com o provedor `@openrouter/ai-sdk-provider`. Primeiro e, por ora, único provedor.
+- O agente (`app/src/agent/agent.ts`) usa `streamText` do pacote `ai` com o provedor `@openrouter/ai-sdk-provider`. Primeiro e, por ora, único provedor.
 - **Configurações:** chave de API e ID do modelo, os dois no `expo-secure-store` (Keystore do Android), nunca no `edji.db`.
 - **Opt-in:** preencher a chave é o opt-in de rede. Sem chave ou sem modelo, o agente responde com uma mensagem de configuração e não faz nenhuma chamada. Só o texto transcrito e o histórico da sessão vão para o OpenRouter; o áudio nunca sai do aparelho. Não enviamos cabeçalhos de identificação do app.
 - **Streaming no React Native:** o `fetch` do React Native não entrega o corpo em partes, então o provedor usa o `expo/fetch`. Polyfills de `structuredClone`, `TextEncoderStream` e `TextDecoderStream` são carregados primeiro no `index.ts`, para valer também na task Headless JS.

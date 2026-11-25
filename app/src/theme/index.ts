@@ -19,6 +19,8 @@ export type Theme = {
   onAccent: string;
   line: string;
   danger: string;
+  /** Dims the screen behind the side panel. */
+  scrim: string;
 };
 
 const light: Theme = {
@@ -30,6 +32,7 @@ const light: Theme = {
   onAccent: '#FFFFFF',
   line: '#D5DED6',
   danger: '#9A2A1F',
+  scrim: 'rgba(7, 20, 14, 0.45)',
 };
 
 const dark: Theme = {
@@ -41,6 +44,7 @@ const dark: Theme = {
   onAccent: brand.ink,
   line: '#24352B',
   danger: '#FF8A7A',
+  scrim: 'rgba(7, 20, 14, 0.45)',
 };
 
 export function useTheme(): Theme {

@@ -101,9 +101,52 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 
 ## Convenções
 
+### Geral
+
 - Código, identificadores e nomes de arquivos e pastas em inglês. Interface e documentação em português.
-- Documente módulos e APIs públicas em inglês, no padrão da linguagem escolhida.
+- Documente módulos e APIs públicas em inglês, no padrão da linguagem (TSDoc `/** ... */` no TypeScript, KDoc no Kotlin). O comentário explica o porquê ou o contrato, não repete o código.
 - Decisões arquiteturais vão em `docs/decisions/NNNN-titulo-curto.md` (contexto, alternativas, decisão, consequências).
+- Mensagens de commit em inglês, no imperativo, com título curto (ex.: "Add voice chat agent with AI SDK and OpenRouter") e corpo com o porquê quando a mudança não for óbvia.
+
+### Nomes de arquivos e pastas (`app/src/`)
+
+| O quê | Padrão | Exemplo |
+| --- | --- | --- |
+| Pastas | minúsculas, plural para coleções | `screens/`, `components/`, `hooks/` |
+| Telas | PascalCase com sufixo `Screen`, em `screens/` | `SettingsScreen.tsx` |
+| Componentes | PascalCase, um componente público por arquivo; agrupados por tela em subpasta | `components/settings/ModelSettings.tsx` |
+| Hooks | camelCase com prefixo `use`, em `hooks/` | `usePlugins.ts` |
+| Módulos sem JSX | camelCase, `.ts` | `registry.ts`, `openrouter.ts` |
+| Entrada de pasta | `index.ts` só quando a pasta é um módulo único | `theme/index.ts`, `plugins/index.ts` |
+| Testes | `__tests__/<módulo>.test.ts(x)` ao lado do código | `agent/__tests__/agent.test.ts` |
+| Plugins | `plugins/<id>/`, com `id` em minúsculas | `plugins/todo/` |
+
+- `.tsx` só para arquivos com JSX; o resto é `.ts`.
+- Código de interface fica em `screens/` e `components/`; lógica sem interface (agente, banco, runtime) fica em `agent/` e `core/` e não importa React Native de UI.
+
+### TypeScript e React
+
+- **Formatação** (ainda sem Prettier ou ESLint; siga o estilo existente): 2 espaços, aspas simples, ponto e vírgula, vírgula final em listas de várias linhas, linhas de até ~130 colunas.
+- **Imports:** externos primeiro, depois internos pelo alias `@/`; `./` só dentro da mesma pasta. O módulo nativo é importado de `modules/edji-assistant` por caminho relativo. Use `import type` para tipos.
+- **Exports:** nomeados. `export default` só onde o framework exige (`App.tsx`).
+- **Tipos:** `strict` ligado; prefira `type` a `interface`; nada de `any` (use `unknown` e restrinja). Tipos de props ficam no mesmo arquivo do componente (`type Props = ...`).
+- **Nomes:** componentes e tipos em PascalCase; funções, variáveis e hooks em camelCase; constantes de módulo em UPPER_SNAKE_CASE (`INSTRUCTIONS`, `PLUGINS`, `WAITING_POLL_MS`). Unidades no nome quando houver (`_MS`).
+- **Componentes:** funções, não classes. Estado local com hooks; lógica reaproveitável ou com efeitos vai para um hook em `hooks/`.
+- **Estilos:** `StyleSheet.create` no fim do arquivo (`const styles`). Cores sempre do `useTheme()`, nunca `#hex` ou `rgba()` soltos em componentes; cor nova entra no tipo `Theme` (claro e escuro) em `theme/`.
+- **Assíncrono:** `async`/`await`. Funções que falam com rede ou modelo não lançam para a interface: devolvem um resultado com status (ex.: `AgentResult`).
+- **Textos de interface:** português curto e direto, no tom da marca (ver Identidade e comunicação).
+
+### Kotlin (`modules/edji-assistant/android`)
+
+- Pacote `dev.edji.assistant`; um arquivo por classe principal, em PascalCase (`CommandInbox.kt`).
+- Constantes em `companion object` com UPPER_SNAKE_CASE e unidade no nome (`TIMEOUT_MS`).
+- Nada de I/O na thread principal da sessão de voz; banco nativo só pelo `CommandInbox`.
+
+### Testes
+
+- Jest com `jest-expo`. Nome do teste descreve o comportamento em inglês (`it('streams the reply so far, in order, ...')`); frases de exemplo em português.
+- Módulos nativos e o `expo-secure-store` são mockados; mocks em `jest.mock` usam variáveis com prefixo `mock`.
+- Antes de concluir: `npm test` e `npm run typecheck` em `app/`.
 
 ## Estrutura atual
 
@@ -111,10 +154,18 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
 - `app/`: app Expo (TypeScript). `npm test` (Jest) e `npm run typecheck`. Pastas `android/` e `ios/` são geradas por `npx expo prebuild` e ignoradas; nunca edite à mão.
-  - `App.tsx`: casca com aba lateral (Início vazio, views dos plugins ligados, Configurações, Registro); abre as Configurações por `edji://settings`. `index.ts` carrega `src/polyfills.ts` primeiro e registra a task Headless JS `EdjiCommand`.
-  - `src/core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), agente (`agent.ts`: `streamText`, instruções, mensagens de erro), provedor (`openrouter.ts`, com `expo/fetch`), chave e modelo (`settings.ts`, `expo-secure-store`), banco e migrações (`db.ts`), execução da caixa de entrada (`runtime.ts`, `headless.ts`).
-  - `src/plugins/`: plugins; registre novos em `src/plugins/index.ts` (hoje vazio).
-  - `src/ui/`: tema da marca, Configurações (modelo, botão lateral, plugins) e Registro.
+  - `index.ts` (entrada do Expo): carrega `src/polyfills.ts` primeiro, registra a task Headless JS `EdjiCommand` e o `src/App.tsx`.
+  - `src/`, com imports pelo alias `@/` (`tsconfig.json` `paths` e `moduleNameMapper` do Jest):
+    - `App.tsx`: casca com cabeçalho, tela atual e aba lateral (Início vazio, views dos plugins ligados, Configurações, Registro).
+    - `screens/`: `HomeScreen`, `SettingsScreen` e `LogScreen`.
+    - `components/`: `Header`, `SidePanel` e `settings/` (`ModelSettings`: chave e modelo; `StatusRow`; estilos).
+    - `hooks/`: `usePlugins` (inicia o runtime e carrega os estados) e `useDeepLink` (`edji://<tela>`; a sessão de voz abre `edji://settings`).
+    - `navigation/destinations.ts`: destinos da aba lateral.
+    - `theme/`: paleta da marca e `useTheme`.
+    - `agent/`: agente (`agent.ts`: `streamText`, instruções, mensagens de erro), provedor (`openrouter.ts`, com `expo/fetch`), chave e modelo (`settings.ts`, `expo-secure-store`).
+    - `core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), banco e migrações (`db.ts`), eventos, execução da caixa de entrada (`runtime.ts`, `headless.ts`).
+    - `plugins/`: plugins; registre novos em `plugins/index.ts` (hoje vazio).
+    - Testes em `__tests__/` ao lado do código.
   - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz em chat (`EdjiSession`), STT, caixa de entrada (`CommandInbox`, versão 2 com `session_id`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`: `pendingCommands`, `pushReply`, `completeCommand`).
   - Jest: `transformIgnorePatterns` no `package.json` inclui `ai`, `@ai-sdk`, `@openrouter` e `@workflow`, que são ESM. Para compilar o Kotlin: `npx expo prebuild --platform android` e `./gradlew :edji-assistant:compileDebugKotlin` em `app/android`, com `JAVA_HOME` apontando para o JDK do Android Studio.
 - Spike de ativação (removido): ficou no commit `7d16948`. Lição que vale manter: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço.
