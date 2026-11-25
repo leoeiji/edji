@@ -4,7 +4,11 @@
  * are the JSON that crosses the bridge, validated on both sides.
  */
 
-/** Version of the trigger and action JSON. Bumped when a kind or field changes meaning. */
+/**
+ * Version of the trigger and action JSON. Not sent over the bridge: the native
+ * side stores it next to the JSON and migrates on read. Bumped when a kind or
+ * field changes meaning.
+ */
 export const ROUTINE_SCHEMA_VERSION = 1;
 
 /** Max actions per routine; they run in order. */

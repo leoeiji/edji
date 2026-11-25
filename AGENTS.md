@@ -164,7 +164,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
   - `src/`, com imports pelo alias `@/` (`tsconfig.json` `paths` e `moduleNameMapper` do Jest):
     - `App.tsx`: casca com cabeçalho, tela atual e aba lateral (Início vazio, views dos plugins ligados, Configurações, Registro).
     - `screens/`: `HomeScreen`, `SettingsScreen` (modelo e plugins), `PermissionsScreen` (todas as permissões do aparelho, inclusive microfone e assistente padrão) e `LogScreen`.
-    - `components/`: `Header`, `SidePanel` e `settings/` (`ModelSettings`: chave e modelo; `StatusRow`; estilos).
+    - `components/`: `Header`, `SidePanel` e `settings/` (`ModelSettings`: chave e modelo; estilos).
     - `hooks/`: `usePlugins` (inicia o runtime e carrega os estados), `usePermissions` (status, atualiza ao voltar ao app) e `useDeepLink` (`edji://<tela>`; a sessão de voz abre `edji://settings`; rotinas sem permissão levam a `edji://permissions`).
     - `navigation/destinations.ts`: destinos da aba lateral.
     - `theme/`: paleta da marca e `useTheme`.

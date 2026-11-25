@@ -14,8 +14,7 @@ export function PermissionsScreen() {
   return (
     <ScrollView contentContainerStyle={settingsStyles.root}>
       <Text style={[styles.intro, { color: t.muted }]}>
-        {missing === 0 ? 'Tudo o que o Edji já usa está permitido.' : `Faltam ${missing} de ${known.length}.`} Cada rotina diz o que
-        precisa; sem a permissão, ela não roda e o Edji avisa.
+        {missing === 0 ? 'Tudo o que o Edji já usa está permitido.' : `Faltam ${missing} de ${known.length}.`}
       </Text>
 
       {PERMISSION_GROUPS.map((g) => (

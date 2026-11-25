@@ -6,7 +6,7 @@
 
 ## Contexto
 
-Queremos que o agente crie rotinas por voz, como "quando eu entrar no carro, abre o Spotify", "quando eu chegar em casa, coloca o som no normal" ou "quando chegar notificação do Nubank, registra o gasto". A rotina precisa disparar com o Edji fechado.
+Queremos que o agente crie rotinas por voz, como "quando eu entrar no carro, abre o Spotify", "quando eu chegar em casa, coloca o som no normal" ou "quando chegar notificação do banco, registra o gasto". A rotina precisa disparar com o Edji fechado.
 
 Pesquisa de ferramentas prontas (novembro de 2026):
 
@@ -42,7 +42,7 @@ Tipos em `app/src/plugins/routines/types.ts`; validação em `schema.ts` (`parse
   - `ask_agent` `{ prompt, reply: silent | notify }`: o prompt só pode usar variáveis do gatilho.
 - **`Place`:** criado no aparelho ("salvar aqui como casa"); o agente nunca inventa coordenadas.
 - **`RoutineRun`:** `outcome` `done | failed | blocked` e `detail`. Nunca guarda texto de notificação.
-- JSON de gatilho e ação com versão (`ROUTINE_SCHEMA_VERSION = 1`). `kind` novo entra em versão nova.
+- JSON de gatilho e ação com versão (`ROUTINE_SCHEMA_VERSION = 1`): a ponte não carrega o campo; o nativo grava a versão junto do JSON no banco e migra ao ler. `kind` novo entra em versão nova.
 
 ### Quem edita
 
@@ -65,7 +65,7 @@ Internamente, o nativo terá `TriggerMonitor` (um por `kind`, `sync(routines)`),
 
 ### Perguntar ao agente
 
-- Caso que motiva: registrar gastos e recebimentos a partir das notificações do Nubank e do BTG.
+- Caso que motiva: registrar gastos e recebimentos a partir das notificações de apps de banco.
 - O nativo grava o disparo na `routine_queue` e acorda a task Headless JS `EdjiCommand` com `reason: 'routine'`; o JS chama `runAgent` sem sessão.
 - Sem rede: tenta de novo com espera crescente e expira em 24 h, com registro. O texto sai da fila ao terminar ou expirar.
 - Sem duplicatas: a mesma notificação (`key` e `postTime`) entra uma vez.
@@ -99,4 +99,3 @@ Conceitos para depois: condições adicionais ("se for dia útil"), desfazer ao 
   - abrir app ou link com o Edji fechado (isenção de `VoiceInteractionService`, `CompanionDeviceManager` ou notificação para tocar);
   - entrega dos gatilhos com o app morto (`ACL_CONNECTED` × presença via CDM, `registerNetworkCallback(PendingIntent)`, geofence com ou sem Play Services);
   - efeito da suspensão de apps da Samsung nos gatilhos.
-- Telas de referência: canvas [Rotinas e Permissões](https://claude.ai/artifact/WWmsrhFBYPGx1ite2ecRXP) (privado).
