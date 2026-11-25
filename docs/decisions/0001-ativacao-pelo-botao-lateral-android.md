@@ -2,7 +2,7 @@
 
 - **Status:** aceita (validada em um aparelho)
 - **Data:** 2026-11-23
-- **Evidência:** spike `spikes/android-assistant/` (branch `0.0.1`, commit `7d16948`)
+- **Evidência:** spike `spikes/android-assistant/` (removido da árvore; branch `0.0.1`, commit `7d16948`)
 
 ## Contexto
 

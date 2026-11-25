@@ -23,7 +23,7 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 
 ## Estado do projeto
 
-- Etapa 1 do roteiro concluída: o spike Android em `spikes/android-assistant/` funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
+- Etapa 1 do roteiro concluída: o spike Android (removido da árvore; recuperável no commit `7d16948`) funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
 - Stack e arquitetura de plugins decididas (ADRs 0002 e 0003). O app Expo em `app/` tem a casca, o núcleo de plugins, o plugin `todo` e o módulo nativo de voz com a caixa de entrada e Headless JS; testes unitários passam, mas o caminho da voz até o tool ainda não foi medido em aparelho (etapa 3). Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
@@ -115,7 +115,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
   - `src/plugins/<id>/`: plugins; registre novos em `src/plugins/index.ts`. `todo`: tela, tools `todo.add`/`todo.list`/`todo.complete`, tabela `todo_items`.
   - `src/ui/`: tema da marca, Configurações e Registro.
   - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz, STT, caixa de entrada (`CommandInbox`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`).
-- `spikes/android-assistant/`: spike descartável em Kotlin (AGP 9.4 com Kotlin embutido, Gradle 9.6 via wrapper, SDK 36, minSdk 31; Compose na tela do app, Views na sessão de voz). Valida o gesto, o STT on-device e as latências; o README traz os passos no aparelho e o checklist para o ADR. Lições do spike: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço. Não é base do MVP.
+- Spike de ativação (removido): ficou no commit `7d16948`. Lição que vale manter: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço.
 - `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins.
 - `.gitignore`: ignora dependências e artefatos de Node/Expo, Gradle/Android/Kotlin, chaves de assinatura, `.env`, IDEs e `.worktree/`. `app/.gitignore` cobre as pastas geradas `android/` e `ios/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.

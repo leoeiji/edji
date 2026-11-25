@@ -24,4 +24,4 @@ App em **Expo (React Native, TypeScript)** com *development builds* (não Expo G
 - A tela, os plugins e a lógica dos tools são TypeScript e servem às duas plataformas; só a captura de voz é nativa por plataforma.
 - A sessão abre o microfone sem iniciar JavaScript, mantendo os ~160 ms medidos. Como os tools dos plugins são TypeScript, a execução depois da fala depende de um runtime JS em segundo plano; ver o caminho da voz na ADR 0003 (hipótese ainda não medida).
 - IA local futura pode usar bibliotecas do ecossistema (`llama.rn`, `whisper.rn`). Rust continua possível depois, como módulo nativo, se algum núcleo exigir.
-- O spike em Kotlin segue como referência até o módulo nativo ser portado; depois pode ser removido.
+- O spike em Kotlin foi removido depois do port; fica no histórico (commit `7d16948`).
