@@ -153,7 +153,7 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `AGENTS.md`: contexto e instruções vivas do repositório.
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
-- `app/`: app Expo (TypeScript). `npm test` (Jest) e `npm run typecheck`. Pastas `android/` e `ios/` são geradas por `npx expo prebuild` e ignoradas; nunca edite à mão.
+- `app/`: app Expo (TypeScript). Configuração em `app.config.ts`; a versão vem só do `package.json` (`versionName`; `versionCode` = MAJOR×10000 + MINOR×100 + PATCH). Para lançar: `npm version X.Y.Z` em `app/`, commit e tag `vX.Y.Z`. `npm test` (Jest) e `npm run typecheck`. Pastas `android/` e `ios/` são geradas por `npx expo prebuild` e ignoradas; nunca edite à mão.
   - `index.ts` (entrada do Expo): carrega `src/polyfills.ts` primeiro, registra a task Headless JS `EdjiCommand` e o `src/App.tsx`.
   - `src/`, com imports pelo alias `@/` (`tsconfig.json` `paths` e `moduleNameMapper` do Jest):
     - `App.tsx`: casca com cabeçalho, tela atual e aba lateral (Início vazio, views dos plugins ligados, Configurações, Registro).
@@ -170,6 +170,8 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
   - Jest: `transformIgnorePatterns` no `package.json` inclui `ai`, `@ai-sdk`, `@openrouter` e `@workflow`, que são ESM. Para compilar o Kotlin: `npx expo prebuild --platform android` e `./gradlew :edji-assistant:compileDebugKotlin` em `app/android`, com `JAVA_HOME` apontando para o JDK do Android Studio.
 - Spike de ativação (removido): ficou no commit `7d16948`. Lição que vale manter: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço.
 - `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins. `0004`: agente com AI SDK e OpenRouter.
+- `.github/workflows/ci.yaml`: job `test-js` (typecheck e Jest em `app/`) a cada push em qualquer branch. É reutilizável (`workflow_call`): o `release.yaml` o chama antes do build, então verificações novas entram só aqui. Jobs separados por plataforma: `test-js` hoje; testes Kotlin entram como `test-android`.
+- `.github/workflows/release.yaml`: ao enviar uma tag `vX.Y.Z`, o job `version` confere se ela bate com a versão do `app/package.json` e o job `ci` roda o `ci.yaml`, em paralelo; o job `build-android` gera o projeto Android com `expo prebuild` e compila `edji-X.Y.Z.apk` (um `build-ios` entraria ao lado); o job `release` publica o APK no GitHub Releases com notas automáticas (`gh release create --generate-notes`). O APK ainda é assinado com a chave de debug do template do Expo.
 - `.gitignore`: ignora dependências e artefatos de Node/Expo, Gradle/Android/Kotlin, chaves de assinatura, `.env`, IDEs e `.worktree/`. `app/.gitignore` cobre as pastas geradas `android/` e `ios/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
 - `LICENSE`: licença Apache 2.0; preserve seu conteúdo.
