@@ -27,7 +27,8 @@ const light: Theme = {
   bg: brand.paper,
   surface: brand.mist,
   text: brand.ink,
-  muted: brand.gray,
+  // Darker than brand.gray: #6F7B72 on mist is ~3.8:1, below 4.5:1 for small text.
+  muted: '#57635B',
   accent: brand.pine,
   onAccent: '#FFFFFF',
   line: '#D5DED6',

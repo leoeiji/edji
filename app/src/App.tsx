@@ -9,6 +9,7 @@ import { usePlugins } from '@/hooks/usePlugins';
 import { destinationsFor } from '@/navigation/destinations';
 import { HomeScreen } from '@/screens/HomeScreen';
 import { LogScreen } from '@/screens/LogScreen';
+import { PermissionsScreen } from '@/screens/PermissionsScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { useTheme } from '@/theme';
 
@@ -36,6 +37,7 @@ function Shell() {
     if (!states) return null;
     if (active.key === 'home') return <HomeScreen />;
     if (active.key === 'settings') return <SettingsScreen plugins={plugins} states={states} onStatesChanged={reload} />;
+    if (active.key === 'permissions') return <PermissionsScreen />;
     if (active.key === 'log') return <LogScreen />;
     const plugin = views.find((p) => p.id === active.key);
     const ctx = contexts[active.key];
