@@ -1,0 +1,36 @@
+# Typecheck and unit tests on every branch push. Also called by release.yaml
+# before building, so a release never checks less than CI. Tags are left to it.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-js:
+    name: JS typecheck and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --ci

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- recognitionService is required for Android to list Edji as an assistant (see ADR 0001). -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="dev.edji.assistant.EdjiRecognitionService"
+    android:sessionService="dev.edji.assistant.EdjiSessionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />

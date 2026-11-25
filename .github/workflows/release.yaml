@@ -1,0 +1,119 @@
+# Builds the Android APK and publishes it to GitHub Releases with
+# auto-generated release notes. Runs when a version tag is pushed:
+#   git tag v0.0.1 && git push origin v0.0.1
+# The tag must match "version" in app/package.json, the single source of the
+# app version (app.config.ts reads it). Bump it with `npm version X.Y.Z` in app/.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: app
+
+      # app.config.ts derives versionCode from this version and fails the build
+      # if it is not MAJOR.MINOR.PATCH with MINOR and PATCH up to 99.
+      - name: Compare tag with package.json
+        id: check
+        working-directory: app
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version=$(node -p "require('./package.json').version")
+          if [ "$tag" != "v$version" ]; then
+            echo "::error file=app/package.json::package.json has version $version, but the tag is $tag"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version $version ✓"
+
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yaml
+
+  build-android:
+    name: Build Android APK
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      apk: ${{ steps.apk.outputs.name }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Generate native project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build APK
+        working-directory: app/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Name APK
+        id: apk
+        run: |
+          name="edji-${{ needs.version.outputs.version }}.apk"
+          mv android/app/build/outputs/apk/release/app-release.apk "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app/${{ steps.apk.outputs.name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    needs: [version, build-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ needs.build-android.outputs.apk }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Edji ${{ needs.version.outputs.version }}" \
+            --generate-notes \
+            --verify-tag

@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*
+
+# Gradle / Android / Kotlin
+.gradle/
+.kotlin/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# Signing keys and secrets
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+.env
+.env*.local
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Worktrees
+.worktree/

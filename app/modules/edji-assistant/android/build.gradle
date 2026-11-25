@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.edji.assistant'
+version = '0.0.1'
+
+android {
+  namespace "dev.edji.assistant"
+  defaultConfig {
+    versionCode 1
+    versionName "0.0.1"
+  }
+}
+
+dependencies {
+  // HeadlessJsTaskService and friends; the version comes from the app's React Native.
+  implementation 'com.facebook.react:react-android'
+}
