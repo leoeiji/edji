@@ -1,3 +1,6 @@
+// Must come first: the AI SDK needs these globals in the app and in the headless task.
+import './src/polyfills';
+
 import { registerRootComponent } from 'expo';
 import { AppRegistry } from 'react-native';
 

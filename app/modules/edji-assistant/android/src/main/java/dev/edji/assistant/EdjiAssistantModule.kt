@@ -7,8 +7,8 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
- * JS bridge for the voice path: command inbox, assistant role status and the
- * diagnostic log. The voice session itself never needs JS to open the mic.
+ * JS bridge for the voice path: command inbox (with streamed replies),
+ * assistant role status and the diagnostic log. The voice session itself never needs JS to open the mic.
  */
 class EdjiAssistantModule : Module() {
 
@@ -25,23 +25,51 @@ class EdjiAssistantModule : Module() {
         OnStartObserving { AssistantLog.addListener(logListener) }
         OnStopObserving { AssistantLog.removeListener(logListener) }
 
-        /** Pending voice commands, oldest first. */
+        /** Pending voice commands, oldest first, each with the earlier turns of its session. */
         AsyncFunction("pendingCommands") {
-            CommandInbox.get(context).pending().map {
-                mapOf("id" to it.id.toDouble(), "text" to it.text, "createdAt" to it.createdAt.toDouble())
+            val inbox = CommandInbox.get(context)
+            inbox.pending().map { c ->
+                val history = c.sessionId?.let { inbox.history(it, c.id) }.orEmpty().flatMap { turn ->
+                    listOf(
+                        mapOf("role" to "user", "content" to turn.text),
+                        mapOf("role" to "assistant", "content" to turn.reply),
+                    )
+                }
+                mapOf(
+                    "id" to c.id.toDouble(),
+                    "text" to c.text,
+                    "createdAt" to c.createdAt.toDouble(),
+                    "history" to history,
+                )
             }
         }
 
         /**
-         * Reports the agent's result for a command. Returns false if it was
-         * already handled. Logs the time from end of STT to tool executed.
+         * Shows the reply so far in the open session. Returns false when the
+         * session no longer waits for it, so the agent can stop streaming.
          */
-        AsyncFunction("completeCommand") { id: Double, ok: Boolean, reply: String ->
+        Function("pushReply") { id: Double, textSoFar: String ->
+            CommandInbox.get(context).progress(id.toLong(), textSoFar)
+        }
+
+        /** Whether the session still waits for the command. Doesn't extend its deadline. */
+        Function("isWaiting") { id: Double -> CommandInbox.get(context).isWaiting(id.toLong()) }
+
+        /** The model is still working without visible text (e.g. reasoning): extends the session's deadline. */
+        Function("heartbeat") { id: Double -> CommandInbox.get(context).heartbeat(id.toLong()) }
+
+        /**
+         * Reports how the agent finished a command (`done`, `setup`, `failed`
+         * or `cancelled`). Returns false if it was no longer pending. Logs the
+         * time from end of STT to full reply.
+         */
+        AsyncFunction("completeCommand") { id: Double, status: String, reply: String ->
+            require(status in CommandInbox.FINAL_STATUSES) { "Unknown status $status" }
             val inbox = CommandInbox.get(context)
             val createdAt = inbox.pending().firstOrNull { it.id == id.toLong() }?.createdAt
-            val changed = inbox.complete(id.toLong(), if (ok) "done" else "failed", reply)
+            val changed = inbox.complete(id.toLong(), status, reply)
             if (changed && createdAt != null) {
-                AssistantLog.log("fim do STT → tool executado: ${System.currentTimeMillis() - createdAt} ms (comando ${id.toLong()})")
+                AssistantLog.log("fim do STT → resposta completa: ${System.currentTimeMillis() - createdAt} ms (comando ${id.toLong()})")
             }
             changed
         }

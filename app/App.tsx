@@ -1,18 +1,20 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { getDb, loadPluginStates } from './src/core/db';
 import type { PluginContext } from './src/core/plugin';
 import { enabledPlugins, type PluginStates } from './src/core/registry';
-import { contextFor, ensureReady, processPendingCommands } from './src/core/runtime';
+import { contextFor, ensureReady } from './src/core/runtime';
 import { PLUGINS } from './src/plugins';
 import { LogView } from './src/ui/LogView';
 import { SettingsView } from './src/ui/SettingsView';
 import { useTheme } from './src/ui/theme';
 
-/** Side-panel destinations: enabled plugin views, then the fixed screens. */
+/** Side-panel destinations: home, enabled plugin views, then the fixed screens. */
 type Destination = { key: string; title: string };
+
+const HOME: Destination = { key: 'home', title: 'Início' };
 
 const FIXED: Destination[] = [
   { key: 'settings', title: 'Configurações' },
@@ -44,18 +46,23 @@ function Shell() {
       const entries = await Promise.all(PLUGINS.map(async (p) => [p.id, await contextFor(p.id)] as const));
       setContexts(Object.fromEntries(entries));
       await reloadStates();
-      await processPendingCommands(); // commands the voice session couldn't finish
     })();
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && processPendingCommands());
+    // The voice session opens edji://settings when the key or the model is missing.
+    const open = (url: string | null | undefined) => {
+      if (url && /^edji:\/\/settings\b/.test(url)) setCurrent('settings');
+    };
+    Linking.getInitialURL().then(open);
+    const sub = Linking.addEventListener('url', (e) => open(e.url));
     return () => sub.remove();
   }, [reloadStates]);
 
   const views = useMemo(() => (states ? enabledPlugins(PLUGINS, states).filter((p) => p.view) : []), [states]);
-  const destinations: Destination[] = [...views.map((p) => ({ key: p.id, title: p.view!.title })), ...FIXED];
+  const destinations: Destination[] = [HOME, ...views.map((p) => ({ key: p.id, title: p.view!.title })), ...FIXED];
   const active = destinations.find((d) => d.key === current) ?? destinations[0];
 
   const body = () => {
     if (!states) return null;
+    if (active.key === 'home') return null; // empty for now: the assistant lives in the voice session
     if (active.key === 'settings') return <SettingsView plugins={PLUGINS} states={states} onStatesChanged={reloadStates} />;
     if (active.key === 'log') return <LogView />;
     const plugin = views.find((p) => p.id === active.key);
@@ -74,7 +81,7 @@ function Shell() {
             <View key={i} style={[styles.menuBar, { backgroundColor: t.text }]} />
           ))}
         </Pressable>
-        <Text style={[styles.title, { color: t.text }]}>{active.title}</Text>
+        <Text style={[styles.title, { color: t.text }]}>{active.key === 'home' ? 'Edji.' : active.title}</Text>
       </View>
 
       <View style={{ flex: 1 }}>{body()}</View>
@@ -86,7 +93,7 @@ function Shell() {
             <Text style={[styles.brand, { color: t.text }]}>Edji.</Text>
             {destinations.map((d, i) => (
               <View key={d.key}>
-                {i === views.length && <View style={[styles.divider, { backgroundColor: t.line }]} />}
+                {i === views.length + 1 && <View style={[styles.divider, { backgroundColor: t.line }]} />}
                 <Pressable
                   onPress={() => {
                     setCurrent(d.key);

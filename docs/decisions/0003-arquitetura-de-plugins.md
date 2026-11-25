@@ -2,7 +2,8 @@
 
 - **Status:** aceita; o caminho da voz até o tool é hipótese a medir em aparelho
 - **Data:** 2026-11-23
-- **Relacionadas:** [0002](0002-stack-react-native-expo.md)
+- **Relacionadas:** [0002](0002-stack-react-native-expo.md), [0004](0004-agente-com-ai-sdk-e-openrouter.md)
+- **Atualização (2026-11-24):** o plugin `todo` foi removido e o agente deixou de rotear para `todo.add`; agora conversa com um modelo pelo OpenRouter, ainda sem tools. O caminho da voz ganhou streaming e cancelamento. Ver ADR 0004. O contrato de plugins segue valendo.
 
 ## Contexto
 

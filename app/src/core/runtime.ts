@@ -1,10 +1,12 @@
-import { EdjiAssistant, assistantLog } from '../../modules/edji-assistant';
+import { EdjiAssistant, assistantLog, type PendingCommand } from '../../modules/edji-assistant';
 import { PLUGINS } from '../plugins';
-import { handleVoiceCommand } from './agent';
-import { getDb, loadPluginStates, migratePlugins } from './db';
+import { runAgent, type AgentResult, type ChatMessage } from './agent';
+import { getDb, migratePlugins } from './db';
 import { emitChanged } from './events';
+import { openRouterModel } from './openrouter';
 import type { PluginContext } from './plugin';
-import { availableTools, validatePlugins } from './registry';
+import { validatePlugins } from './registry';
+import { loadModelSettings } from './settings';
 
 let ready: Promise<void> | null = null;
 
@@ -25,9 +27,10 @@ export async function contextFor(pluginId: string): Promise<PluginContext> {
 let processing: Promise<number> | null = null;
 
 /**
- * Runs every pending voice command through the agent and reports each result
- * to the native inbox. Single-flight: the app and the headless task share one
- * runtime, and running twice would execute a tool twice.
+ * Answers every pending voice command with the agent, streaming the reply to
+ * the open session. Single-flight: running twice would call the model twice.
+ * Only the headless task calls this; commands of a closed session are
+ * cancelled natively, so nothing is ever sent after the fact.
  */
 export function processPendingCommands(): Promise<number> {
   processing ??= run().finally(() => {
@@ -36,17 +39,59 @@ export function processPendingCommands(): Promise<number> {
   return processing;
 }
 
+/** How often a running turn checks that its session still waits for it. */
+export const WAITING_POLL_MS = 1000;
+
 async function run(): Promise<number> {
   if (!EdjiAssistant) return 0;
   await ensureReady();
-  const commands = await EdjiAssistant.pendingCommands();
-  if (commands.length === 0) return 0;
-  const db = await getDb();
-  const tools = availableTools(PLUGINS, await loadPluginStates(db));
-  for (const c of commands) {
-    const result = await handleVoiceCommand(c.text, tools, contextFor);
-    await EdjiAssistant.completeCommand(c.id, result.ok, result.reply);
-    assistantLog(`agente: comando ${c.id} → ${result.ok ? 'ok' : 'falhou'}: ${result.reply}`);
+  let total = 0;
+  // Loop until empty: a command stored while this run was busy must not be dropped.
+  for (;;) {
+    const commands = await EdjiAssistant.pendingCommands();
+    if (commands.length === 0) break;
+    for (const c of commands) {
+      const result = await answer(c);
+      await EdjiAssistant.completeCommand(c.id, result.status, result.reply);
+      assistantLog(`agente: comando ${c.id} → ${result.status}${result.status === 'done' ? '' : `: ${result.reply}`}`);
+      total++;
+    }
   }
-  return commands.length;
+  return total;
+}
+
+async function answer(c: PendingCommand): Promise<AgentResult> {
+  const assistant = EdjiAssistant!;
+  const controller = new AbortController();
+  // The session may give up (timeout, closed) while the model sends nothing; stop then too.
+  const poll = setInterval(() => {
+    if (!assistant.isWaiting(c.id)) controller.abort();
+  }, WAITING_POLL_MS);
+  const startedAt = Date.now();
+  let first = true;
+  try {
+    return await runAgent({
+      messages: messagesFor(c),
+      settings: await loadModelSettings(),
+      signal: controller.signal,
+      createModel: openRouterModel,
+      onText: (text) => {
+        if (first) {
+          first = false;
+          assistantLog(`agente: primeiro texto em ${Date.now() - startedAt} ms`);
+        }
+        if (!assistant.pushReply(c.id, text)) controller.abort(); // session closed
+      },
+      onActivity: () => {
+        if (!assistant.heartbeat(c.id)) controller.abort();
+      },
+    });
+  } finally {
+    clearInterval(poll);
+  }
+}
+
+/** The session's earlier turns followed by the new transcript. */
+export function messagesFor(c: Pick<PendingCommand, 'text' | 'history'>): ChatMessage[] {
+  return [...c.history, { role: 'user', content: c.text }];
 }

@@ -25,7 +25,8 @@ class EdjiCommandTaskService : HeadlessJsTaskService() {
 
     companion object {
         const val TASK_NAME = "EdjiCommand"
-        private const val TIMEOUT_MS = 15_000L
+        /** Long enough for a model reply; the session gives up earlier on its own. */
+        private const val TIMEOUT_MS = 60_000L
 
         /** Starts the JS task. Returns false (and logs) if Android refuses to start the service. */
         fun start(context: Context, reason: String, commandId: Long? = null): Boolean = try {

@@ -10,21 +10,21 @@ Construir um assistente pessoal para celular que rode localmente o máximo poss�
 
 ### MVP
 
-App **Android** com uma lista de tarefas:
+App **Android** com um chat por voz ([ADR 0004](docs/decisions/0004-agente-com-ai-sdk-e-openrouter.md)):
 
 1. O usuário segura o botão de ligar/desligar.
 2. O Edji abre o reconhecimento de voz (STT) no aparelho.
-3. O texto transcrito vira um item novo na lista, salvo localmente, com uma confirmação curta (visual ou háptica).
-4. A tela do app exibe a lista.
+3. O texto transcrito vai para o agente, que chama o modelo configurado no OpenRouter, e a resposta aparece na sessão, num balão acima da bolinha.
+4. Tocar na bolinha abre o microfone para o próximo turno. Fechar a sessão apaga a conversa.
 
-No MVP, o texto falado inteiro vira a tarefa; não há interpretação de intenção. Fora do MVP: listar, concluir ou editar por voz; outros comandos (lembretes, agenda, notas, perguntas abertas); iOS.
+O agente ainda não tem tools. A tela inicial do app fica vazia; as Configurações têm a chave de API e o modelo. Fora do MVP: tools (plugins), histórico persistente, modelo local, iOS.
 
-Critério de aceite proposto: num Android real configurado com o Edji como assistente padrão, segurar o botão, dizer "comprar pão" e ver "comprar pão" na lista ao abrir o app, sem rede.
+Critério de aceite proposto: num Android real configurado com o Edji como assistente padrão e com chave e modelo preenchidos, segurar o botão, fazer uma pergunta e ver a resposta aparecer em partes; tocar na bolinha e fazer uma pergunta que dependa da anterior. Sem chave, a sessão pede a configuração sem chamar a rede.
 
 ## Estado do projeto
 
 - Etapa 1 do roteiro concluída: o spike Android (removido da árvore; recuperável no commit `7d16948`) funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
-- Stack e arquitetura de plugins decididas (ADRs 0002 e 0003). O app Expo em `app/` tem a casca, o núcleo de plugins, o plugin `todo` e o módulo nativo de voz com a caixa de entrada e Headless JS; testes unitários passam, mas o caminho da voz até o tool ainda não foi medido em aparelho (etapa 3). Não descreva funcionalidades como implementadas sem evidência.
+- Stack, arquitetura de plugins e agente decididos (ADRs 0002, 0003 e 0004). O app Expo em `app/` tem a casca, o núcleo de plugins (sem nenhum plugin; o `todo` foi removido), o agente com AI SDK + OpenRouter e o módulo nativo de voz com chat, caixa de entrada e Headless JS. Testes unitários passam e o Kotlin compila, mas nada disso foi verificado em aparelho (etapa 3). Não descreva funcionalidades como implementadas sem evidência.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
@@ -43,9 +43,9 @@ Sem calendário. Cada etapa só conta como concluída com evidência em aparelho
 
 1. **Spike de ativação (Android).** App mínimo que vira assistente padrão e, ao segurar o botão, abre o microfone e mostra o texto transcrito. Registrar aparelhos testados e resultado em `docs/decisions/`.
 2. ~~**Decisão da stack.**~~ Concluída: ADRs 0002 (stack) e 0003 (plugins).
-3. **Spike do caminho da voz.** Medir no S26, com o app fechado, "fim do STT → tool executado" usando Headless JS e a caixa de entrada de comandos. Registrar ADR.
-4. **MVP.** Casca Expo com aba lateral, registro de plugins e plugin `todo`; o texto transcrito vira item da lista pelo `todo.add`.
-5. **Depois do MVP.** Escolha do tool pela frase (listar, concluir), novos plugins (ex.: agenda) e iOS (Action Button/App Intents).
+3. **Caminho da voz em aparelho.** Medir no S26, com o app fechado, "fim do STT → primeiro texto" e "→ resposta completa" (Headless JS, caixa de entrada, streaming via `expo/fetch`), com tela bloqueada e sem rede. Registrar ADR.
+4. **MVP.** Chat por voz com o agente sem tools (ADR 0004).
+5. **Depois do MVP.** Tools no agente e plugins (ex.: tarefas, agenda), modelo local e iOS (Action Button/App Intents).
 
 ## Stack
 
@@ -58,6 +58,7 @@ app (Expo, TypeScript): casca da interface, aba lateral, configurações, agente
     android/ (Kotlin): serviço de assistente, sessão de voz, STT on-device
     ios/     (Swift): App Intent + Action Button, depois do MVP
   edji.db (JS): plugins ligados, esquemas, dados dos plugins · edji-inbox.db (nativo): caixa de entrada de comandos
+  expo-secure-store: chave do OpenRouter e ID do modelo
 ```
 
 ## Plugins
@@ -68,20 +69,20 @@ Contrato completo na [ADR 0003](docs/decisions/0003-arquitetura-de-plugins.md).
 - Declara manifesto (`id`, nome, versão, ligado por padrão) e, opcionalmente, **tools** para o agente (`<id>.<ação>`, JSON Schema, handler TS com resposta curta) e uma **interface** na aba lateral.
 - Dados em tabelas com prefixo do plugin e migrações versionadas.
 - Desligar esconde a interface e tira os tools do registro, mas **preserva os dados**. O estado fica em `plugin_state` no `edji.db`.
-- O plugin `todo` é o primeiro: interface da lista e tools `todo.add`, `todo.list`, `todo.complete`. No MVP o agente só roteia a frase inteira para `todo.add`.
-- **Caminho da voz (hipótese, medir):** a sessão nativa abre o microfone sem JS, inicia um runtime JS em segundo plano enquanto o usuário fala, grava o texto numa caixa de entrada de comandos e o JS executa o tool. Se o JS não responder a tempo, o comando fica pendente e a sessão diz isso.
+- Nenhum plugin registrado por enquanto (o `todo` temporário foi removido). O agente ainda não usa tools; quando usar, eles vêm dos plugins ligados.
+- **Caminho da voz (hipótese, medir):** a sessão nativa abre o microfone sem JS, inicia um runtime JS em segundo plano enquanto o usuário fala, grava o texto numa caixa de entrada de comandos (com `session_id`) e o JS roda o agente, empurrando a resposta parcial com `pushReply`. Fechar a sessão cancela o comando; nada é reprocessado depois.
 
 ## Questões em aberto
 
 - **STT no aparelho:** reconhecimento on-device do Android (`SpeechRecognizer`), whisper.cpp ou Vosk. Critérios: português, latência, tamanho do modelo e funcionamento offline. Para o MVP, o reconhecimento do sistema pode bastar se funcionar offline.
-- **Escolha do tool (pós-MVP):** regras simples ou modelo de linguagem local com tool calling. Avaliar bateria, memória e tamanho do app.
+- **Tools no agente (pós-MVP):** tool calling pelo AI SDK com os tools dos plugins ligados; avaliar também um modelo local.
 - **Tools a partir do iOS:** App Intents rodam em Swift; como executar tools TypeScript pelo Action Button.
 - **Confirmação:** háptica, visual ou TTS do sistema.
-- **Nuvem opcional:** se existir, como opt-in explícito e desligado por padrão.
+- **Outros provedores e modelo local:** hoje só OpenRouter (ADR 0004).
 
 ## Princípios
 
-- **Local e privado.** Áudio, transcrições e tarefas ficam no aparelho por padrão. Nenhuma chamada de rede sem opt-in explícito e documentado.
+- **Local e privado.** Áudio, transcrições e dados ficam no aparelho por padrão. Nenhuma chamada de rede sem opt-in explícito e documentado. Preencher a chave do OpenRouter é o opt-in do agente: sem chave, nada sai do aparelho; com chave, só o texto da conversa vai para o OpenRouter, nunca o áudio (ADR 0004).
 - **Resposta rápida.** Medir o tempo entre o gesto e o microfone aberto, e entre o fim da fala e a confirmação.
 - **Falhas claras.** Comando não entendido, microfone negado ou papel de assistente ausente devem gerar mensagens compreensíveis e um caminho para resolver.
 - **Testes.** Toda melhoria vem com um teste de regressão que cubra o comportamento alterado. A interpretação de comandos deve ter testes com frases de exemplo em português. Comportamento de hardware é verificado manualmente em aparelho real e registrado.
@@ -94,8 +95,8 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - **Símbolo:** cinco barras simétricas mint sobre verde-pinho, com cantos arredondados. Sem microfone, checklist, sombra ou texto dentro do ícone. No Android adaptativo, as barras são o foreground e o verde-pinho o background; os SVGs de referência são gerados pelo próprio brandbook (seção Kit de marca).
 - **Paleta:** verde-pinho `#073E2B` (confiança, controles), mint `#78FF9B` (ação concluída, destaques), preto editorial `#152019`, papel `#F7F9F5`, névoa `#E8EFE8`, cinza orgânico `#6F7B72`. Mint só sobre superfícies escuras, formas e estados ativos; em fundo claro, use verde-pinho ou preto para texto. Confira o contraste real.
 - **Tipografia:** fonte do sistema no app (Roboto no Android), pesos 700–900 em títulos. O traço manuscrito é só decoração de marca, nunca texto essencial nem interface.
-- **Sessão de voz:** quatro estados, Pronto → Ouvindo... → Entendi. → Anotado., com retorno à tela anterior. Sem escuta contínua.
-- **Feedback:** háptica é o sinal principal (proposta: 20 ms ao iniciar a captura; 20 + 45 + 25 ms ao salvar). Som de confirmação opcional, menos de 300 ms, desligado por padrão.
+- **Sessão de voz:** chat com balões acima da bolinha. Estados: Ouvindo... → Pensando... → Respondendo... → resposta (ADR 0004; o brandbook ainda mostra Pronto → Ouvindo... → Entendi. → Anotado.). O microfone só reabre ao tocar na bolinha; sem escuta contínua. Fechar a sessão apaga a conversa.
+- **Feedback:** háptica é o sinal principal (proposta: 20 ms ao iniciar a captura; 20 + 45 + 25 ms quando a resposta termina). Som de confirmação opcional, menos de 300 ms, desligado por padrão.
 - **Tom:** português curto e direto ("Anotado.", "Não entendi. Pode repetir?"). Evite mensagens burocráticas ("Sua solicitação foi processada com sucesso!") e propaganda de IA.
 
 ## Convenções
@@ -110,13 +111,14 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
 - `CONTRIBUTING.md`: orientações de contribuição e template de descrição de PR.
 - `README.md`: apresentação do projeto.
 - `app/`: app Expo (TypeScript). `npm test` (Jest) e `npm run typecheck`. Pastas `android/` e `ios/` são geradas por `npx expo prebuild` e ignoradas; nunca edite à mão.
-  - `App.tsx`: casca com aba lateral (views dos plugins ligados, Configurações, Registro). `index.ts` registra a task Headless JS `EdjiCommand`.
-  - `src/core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), agente (`agent.ts`, MVP roteia tudo para `todo.add`), banco e migrações (`db.ts`), execução da caixa de entrada (`runtime.ts`, `headless.ts`).
-  - `src/plugins/<id>/`: plugins; registre novos em `src/plugins/index.ts`. `todo`: tela, tools `todo.add`/`todo.list`/`todo.complete`, tabela `todo_items`.
-  - `src/ui/`: tema da marca, Configurações e Registro.
-  - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz, STT, caixa de entrada (`CommandInbox`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`).
+  - `App.tsx`: casca com aba lateral (Início vazio, views dos plugins ligados, Configurações, Registro); abre as Configurações por `edji://settings`. `index.ts` carrega `src/polyfills.ts` primeiro e registra a task Headless JS `EdjiCommand`.
+  - `src/core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), agente (`agent.ts`: `streamText`, instruções, mensagens de erro), provedor (`openrouter.ts`, com `expo/fetch`), chave e modelo (`settings.ts`, `expo-secure-store`), banco e migrações (`db.ts`), execução da caixa de entrada (`runtime.ts`, `headless.ts`).
+  - `src/plugins/`: plugins; registre novos em `src/plugins/index.ts` (hoje vazio).
+  - `src/ui/`: tema da marca, Configurações (modelo, botão lateral, plugins) e Registro.
+  - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz em chat (`EdjiSession`), STT, caixa de entrada (`CommandInbox`, versão 2 com `session_id`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`: `pendingCommands`, `pushReply`, `completeCommand`).
+  - Jest: `transformIgnorePatterns` no `package.json` inclui `ai`, `@ai-sdk`, `@openrouter` e `@workflow`, que são ESM. Para compilar o Kotlin: `npx expo prebuild --platform android` e `./gradlew :edji-assistant:compileDebugKotlin` em `app/android`, com `JAVA_HOME` apontando para o JDK do Android Studio.
 - Spike de ativação (removido): ficou no commit `7d16948`. Lição que vale manter: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço.
-- `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins.
+- `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins. `0004`: agente com AI SDK e OpenRouter.
 - `.gitignore`: ignora dependências e artefatos de Node/Expo, Gradle/Android/Kotlin, chaves de assinatura, `.env`, IDEs e `.worktree/`. `app/.gitignore` cobre as pastas geradas `android/` e `ios/`.
 - `docs/references/edji-brandbook-01.html`: brandbook interativo (abrir no navegador); preserve-o como referência e registre novas edições como arquivos novos.
 - `LICENSE`: licença Apache 2.0; preserve seu conteúdo.
