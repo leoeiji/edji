@@ -46,18 +46,20 @@ object ActionRunner {
     private fun openApp(context: Context, routine: Routine, packageName: String, label: String): ActionOutcome {
         val launch = context.packageManager.getLaunchIntentForPackage(packageName)
             ?: return ActionOutcome("failed", "$label não está instalado")
-        return start(context, routine, launch, "Abriu $label", "Toque para abrir $label")
+        return start(context, routine, launch, "Pediu para abrir $label", "Toque para abrir $label")
     }
 
     private fun openUrl(context: Context, routine: Routine, url: String): ActionOutcome {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
         if (intent.resolveActivity(context.packageManager) == null) return ActionOutcome("failed", "Nenhum app abre esse link")
-        return start(context, routine, intent, "Abriu o link", "Toque para abrir o link")
+        return start(context, routine, intent, "Pediu para abrir o link", "Toque para abrir o link")
     }
 
     /**
-     * Starts [intent] directly when Android allows it from the background;
-     * otherwise posts a notification the user taps (ADR 0005, to validate).
+     * Starts [intent] directly when Android should allow it from the
+     * background; otherwise posts a notification the user taps (ADR 0005, to
+     * validate). Android blocks background starts silently, so the log says
+     * "Pediu para abrir", never that it opened.
      */
     private fun start(context: Context, routine: Routine, intent: Intent, opened: String, tapText: String): ActionOutcome {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)

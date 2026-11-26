@@ -29,7 +29,7 @@ class RoutineTriggerReceiver : BroadcastReceiver() {
                         } ?: device.address
                         RoutineEngine.onBluetooth(app, device.address, name, intent.action == BluetoothDevice.ACTION_ACL_CONNECTED)
                     }
-                    Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED,
+                    Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> RoutineEngine.sync(app, afterBoot = true)
                     Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_TIME_CHANGED -> RoutineEngine.sync(app)
                 }
             } finally {

@@ -171,6 +171,12 @@ class EdjiAssistantModule : Module() {
 
         Function("setRoutinesAgentAllowed") { allowed: Boolean -> RoutineEngine.setAgentAllowed(context, allowed) }
 
+        /** Pauses every routine while the Rotinas plugin is off, and resumes them when it is back on. */
+        AsyncFunction("setRoutinesPaused") { paused: Boolean ->
+            RoutineEngine.setPaused(context, paused)
+            RoutineEngine.sync(context)
+        }
+
         // Permissions (ADR 0005)
 
         Function("permissionStatus") { ids: List<String> -> ids.associateWith { DevicePermissions.status(context, it) } }

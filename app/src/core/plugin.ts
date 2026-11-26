@@ -58,4 +58,9 @@ export type Plugin = {
   tools?: Tool<any>[];
   view?: PluginView;
   migrations?: Migration[];
+  /**
+   * Called with the plugin's state at startup and whenever the user flips
+   * its switch, for plugins with work outside JS (e.g. native triggers).
+   */
+  onEnabledChange?(enabled: boolean): void | Promise<void>;
 };

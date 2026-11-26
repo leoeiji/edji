@@ -16,6 +16,17 @@ export function availableTools(plugins: Plugin[], states: PluginStates): Tool<an
   return enabledPlugins(plugins, states).flatMap((p) => p.tools ?? []);
 }
 
+/** Tells every plugin with an `onEnabledChange` hook whether it is on. Never throws. */
+export async function applyEnabledStates(plugins: Plugin[], states: PluginStates): Promise<void> {
+  for (const p of plugins) {
+    try {
+      await p.onEnabledChange?.(isEnabled(p, states));
+    } catch {
+      // A plugin's native side may be missing (tests, iOS); the switch still works in JS.
+    }
+  }
+}
+
 /**
  * Checks the plugin list at startup: unique ids, tool names namespaced with
  * the plugin id and unique, migrations in increasing order. Throws on error.

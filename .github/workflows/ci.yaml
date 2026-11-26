@@ -34,3 +34,35 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test -- --ci
+
+  test-android:
+    name: Kotlin unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Generate native project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Run Kotlin unit tests
+        working-directory: app/android
+        run: ./gradlew :edji-assistant:testDebugUnitTest --no-daemon

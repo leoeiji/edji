@@ -1,3 +1,4 @@
+import { EdjiAssistant } from '../../../modules/edji-assistant';
 import type { Plugin } from '@/core/plugin';
 import { RoutinesView } from './RoutinesView';
 import { routineTools } from './tools';
@@ -13,4 +14,6 @@ export const routinesPlugin: Plugin = {
   enabledByDefault: true,
   tools: routineTools(),
   view: { title: 'Rotinas', Component: RoutinesView },
+  // Off means off: the native engine stops firing, not just the tab and tools.
+  onEnabledChange: (enabled) => EdjiAssistant?.setRoutinesPaused(!enabled),
 };

@@ -61,6 +61,8 @@ type RoutinesNative = {
   /** Whether routines may send text to the agent with nobody present. Off by default. */
   isRoutinesAgentAllowed(): boolean;
   setRoutinesAgentAllowed(allowed: boolean): void;
+  /** Pauses every routine (the Rotinas plugin is off) or resumes them. */
+  setRoutinesPaused(paused: boolean): Promise<void>;
   permissionStatus(ids: PermissionId[]): Record<PermissionId, PermissionStatus>;
   /** Opens the Android screen where the user grants a special permission. */
   openPermissionSettings(id: PermissionId): void;

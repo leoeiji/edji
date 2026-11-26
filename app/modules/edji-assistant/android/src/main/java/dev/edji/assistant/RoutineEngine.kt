@@ -13,7 +13,6 @@ import android.net.NetworkRequest
 import android.net.Uri
 import android.net.wifi.WifiManager
 import java.time.ZonedDateTime
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -31,13 +30,13 @@ object RoutineEngine {
     private const val KEY_AGENT_ALLOWED = "agent_allowed"
     private const val KEY_WIFI_SSID = "wifi_last_ssid"
     private const val KEY_TIME_IDS = "time_routine_ids"
-    private const val KEY_PLACE_IDS = "proximity_place_ids"
+    private const val KEY_PLACES = "proximity_places"
+    private const val KEY_PAUSED = "paused"
     /** Ignore a second firing of the same routine this soon (Bluetooth and Wi-Fi flap). */
     private const val COOLDOWN_MS = 30_000L
     private const val MAX_SEEN_KEYS = 200
 
     private val worker = Executors.newSingleThreadExecutor()
-    private val lastFired = ConcurrentHashMap<String, Long>()
     private val seenKeys = LinkedHashSet<String>()
 
     /** Runs [block] on the engine thread; never on the main thread (no I/O there). */
@@ -59,14 +58,29 @@ object RoutineEngine {
         prefs(context).edit().putBoolean(KEY_AGENT_ALLOWED, allowed).apply()
     }
 
+    /** Paused when the user turns the Rotinas plugin off: nothing fires, nothing is registered. */
+    fun isPaused(context: Context): Boolean = prefs(context).getBoolean(KEY_PAUSED, false)
+
+    fun setPaused(context: Context, paused: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PAUSED, paused).apply()
+    }
+
+    /** Routines that may fire now: none while paused. */
+    private fun active(context: Context): List<Routine> =
+        if (isPaused(context)) emptyList() else RoutineStore.get(context).enabledRoutines()
+
     // Registration
 
-    /** Brings Android's registrations in line with the enabled routines. Call after any change and at boot. */
-    fun sync(context: Context) {
+    /**
+     * Brings Android's registrations in line with the enabled routines. Call
+     * after any change. [afterBoot]: Android forgot the proximity alerts
+     * (boot, app update), so they are all added again.
+     */
+    fun sync(context: Context, afterBoot: Boolean = false) {
         val app = context.applicationContext
-        val routines = RoutineStore.get(app).enabledRoutines()
+        val routines = active(app)
         syncTime(app, routines)
-        syncPlaces(app, routines)
+        syncPlaces(app, routines, afterBoot)
         syncWifi(app, routines.any { it.trigger.optString("kind") == "wifi" })
         val due = RoutineStore.get(app).nextDueAt()
         if (due != null) scheduleQueueWakeup(app, due)
@@ -87,28 +101,34 @@ object RoutineEngine {
         prefs(context).edit().putStringSet(KEY_TIME_IDS, timed.map { it.id }.toSet()).apply()
     }
 
-    private fun syncPlaces(context: Context, routines: List<Routine>) {
+    /**
+     * Diff-based: an alert added while the phone is already inside the
+     * radius reports "entering", so re-adding unchanged places on every sync
+     * would fire their routines again. Each place is kept as `id|lat|lng|radius`.
+     */
+    private fun syncPlaces(context: Context, routines: List<Routine>, afterBoot: Boolean) {
         val location = context.getSystemService(LocationManager::class.java)
-        val wanted = routines.filter { it.trigger.optString("kind") == "place" }.map { it.trigger.getString("placeId") }.toSet()
-        val previous = prefs(context).getStringSet(KEY_PLACE_IDS, emptySet()).orEmpty()
-        for (id in previous) location.removeProximityAlert(placePendingIntent(context, id))
+        val ids = routines.filter { it.trigger.optString("kind") == "place" }.map { it.trigger.getString("placeId") }.toSet()
+        val places = RoutineStore.get(context).listPlaces().filter { it.id in ids }
+        val wanted = places.associateBy { "${it.id}|${it.latitude}|${it.longitude}|${it.radiusM}" }
+        val previous = if (afterBoot) emptySet() else prefs(context).getStringSet(KEY_PLACES, emptySet()).orEmpty()
+        for (key in previous - wanted.keys) location.removeProximityAlert(placePendingIntent(context, key.substringBefore('|')))
         if (wanted.isNotEmpty() && !DevicePermissions.has(context, Manifest.permission.ACCESS_FINE_LOCATION)) {
             AssistantLog.log("rotinas: sem localização, lugares não são vigiados")
-            prefs(context).edit().putStringSet(KEY_PLACE_IDS, emptySet()).apply()
+            prefs(context).edit().putStringSet(KEY_PLACES, emptySet()).apply()
             return
         }
-        val places = RoutineStore.get(context).listPlaces().associateBy { it.id }
-        val registered = mutableSetOf<String>()
-        for (id in wanted) {
-            val p = places[id] ?: continue
+        val registered = previous.intersect(wanted.keys).toMutableSet()
+        for ((key, p) in wanted) {
+            if (key in registered) continue
             try {
-                location.addProximityAlert(p.latitude, p.longitude, p.radiusM.toFloat(), -1, placePendingIntent(context, id))
-                registered.add(id)
+                location.addProximityAlert(p.latitude, p.longitude, p.radiusM.toFloat(), -1, placePendingIntent(context, p.id))
+                registered.add(key)
             } catch (e: SecurityException) {
                 AssistantLog.log("rotinas: proximidade negada para ${p.name}")
             }
         }
-        prefs(context).edit().putStringSet(KEY_PLACE_IDS, registered).apply()
+        prefs(context).edit().putStringSet(KEY_PLACES, registered).apply()
     }
 
     private fun syncWifi(context: Context, wanted: Boolean) {
@@ -123,10 +143,11 @@ object RoutineEngine {
             }
         }
         if (!wanted) return
+        // The current network first: the callbacks deliver right away and must not see a change.
+        prefs(context).edit().putString(KEY_WIFI_SSID, currentSsid(context)).commit()
         // Available Wi-Fi tells us we connected; available cellular usually means Wi-Fi was lost.
         cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), wifi)
         cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR).build(), other)
-        prefs(context).edit().putString(KEY_WIFI_SSID, currentSsid(context)).apply()
     }
 
     // Events
@@ -163,7 +184,7 @@ object RoutineEngine {
 
     fun onTime(context: Context, routineId: String) {
         val routine = RoutineStore.get(context).getRoutine(routineId)
-        if (routine != null && routine.enabled) runRoutine(context, routine, mapOf("time" to routine.trigger.optString("at")), null)
+        if (routine != null && routine.enabled && !isPaused(context)) runRoutine(context, routine, mapOf("time" to routine.trigger.optString("at")), null)
         sync(context) // schedules the next occurrence
     }
 
@@ -193,11 +214,10 @@ object RoutineEngine {
         cooldown: Boolean = true,
         matches: (org.json.JSONObject) -> Boolean,
     ) {
-        for (r in RoutineStore.get(context).enabledRoutines()) {
+        for (r in active(context)) {
             if (!matches(r.trigger)) continue
-            val now = System.currentTimeMillis()
-            if (cooldown && now - (lastFired[r.id] ?: 0L) < COOLDOWN_MS) continue
-            lastFired[r.id] = now
+            // From the stored last run: the receiver's process may have died since.
+            if (cooldown && System.currentTimeMillis() - (r.lastRunAt ?: 0L) < COOLDOWN_MS) continue
             runRoutine(context, r, vars, dedupeKey)
         }
     }
