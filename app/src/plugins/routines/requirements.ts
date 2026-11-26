@@ -9,7 +9,13 @@ const TRIGGER_PERMISSIONS: Record<Trigger['kind'], PermissionId[]> = {
   notification: ['notification_access'],
 };
 
-function actionPermissions(action: Action): PermissionId[] {
+/** Permissions a trigger needs. */
+export function triggerPermissions(trigger: Trigger): PermissionId[] {
+  return TRIGGER_PERMISSIONS[trigger.kind];
+}
+
+/** Permissions an action needs; they can depend on its options (silent mode, notify reply). */
+export function actionPermissions(action: Action): PermissionId[] {
   switch (action.kind) {
     case 'open_app':
     case 'open_url':
@@ -26,7 +32,7 @@ function actionPermissions(action: Action): PermissionId[] {
 
 /** Every permission a routine needs to run, without repeats, trigger first. */
 export function requiredPermissions(draft: Pick<RoutineDraft, 'trigger' | 'actions'>): PermissionId[] {
-  const ids = [...TRIGGER_PERMISSIONS[draft.trigger.kind], ...draft.actions.flatMap(actionPermissions)];
+  const ids = [...triggerPermissions(draft.trigger), ...draft.actions.flatMap(actionPermissions)];
   return [...new Set(ids)];
 }
 

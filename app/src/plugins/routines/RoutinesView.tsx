@@ -2,20 +2,25 @@ import { useState, type ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { missingPermissions, permissionById } from '@/core/permissions';
 import { useTheme } from '@/theme';
+import { ACTION_CATALOG, TRIGGER_CATALOG, type CatalogEntry } from './catalog';
 import { describeAction, describeRoutine, describeTrigger } from './describe';
 import { formatWhen, routineFooter, runLabel } from './format';
 import { requiredPermissions } from './requirements';
-import type { Routine } from './types';
+import { MAX_ACTIONS, type Routine } from './types';
 import { useRoutines, type RoutinesData } from './useRoutines';
 
+type Tab = 'routines' | 'actions' | 'triggers';
+
 /**
- * Read-only list of routines and their details. Only the agent creates or
+ * Read-only list of routines and their details, plus a catalog of the
+ * triggers and actions available. Only the agent creates or
  * changes routines for now (ADR 0005), so there are no edit controls here.
  */
 export function RoutinesView() {
   const { data, reload } = useRoutines();
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<Tab>('routines');
 
   const refresh = async () => {
     setRefreshing(true);
@@ -30,9 +35,93 @@ export function RoutinesView() {
       {routine ? (
         <RoutineDetail routine={routine} data={data} onBack={() => setSelected(null)} />
       ) : (
-        <RoutineList data={data} onOpen={setSelected} />
+        <>
+          <Tabs tab={tab} onChange={setTab} />
+          {tab === 'routines' && <RoutineList data={data} onOpen={setSelected} />}
+          {tab === 'triggers' && <Catalog kind="triggers" statuses={data.statuses} />}
+          {tab === 'actions' && <Catalog kind="actions" statuses={data.statuses} />}
+        </>
       )}
     </ScrollView>
+  );
+}
+
+function Tabs({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
+  const t = useTheme();
+  const items: { id: Tab; label: string }[] = [
+    { id: 'routines', label: 'Rotinas' },
+    { id: 'actions', label: 'Ações' },
+    { id: 'triggers', label: 'Gatilhos' },
+  ];
+  return (
+    <View style={[styles.tabs, { backgroundColor: t.surface }]} accessibilityRole="tablist">
+      {items.map((item) => {
+        const active = item.id === tab;
+        return (
+          <Pressable
+            key={item.id}
+            onPress={() => onChange(item.id)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            style={[styles.tab, active && { backgroundColor: t.accent }]}
+          >
+            <Text style={[styles.tabText, { color: active ? t.onAccent : t.muted }]}>{item.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** What the agent can use to build a routine, with the permissions each one needs. */
+function Catalog({ kind, statuses }: { kind: 'triggers' | 'actions'; statuses: RoutinesData['statuses'] }) {
+  const t = useTheme();
+  const triggers = kind === 'triggers';
+  return (
+    <View style={styles.list}>
+      <Text style={[styles.intro, { color: t.muted }]}>
+        {triggers
+          ? 'O que faz uma rotina disparar. Cada rotina tem um gatilho.'
+          : `O que a rotina faz quando dispara. Até ${MAX_ACTIONS} ações por rotina, em ordem.`}
+      </Text>
+      {triggers
+        ? TRIGGER_CATALOG.map((e) => <CatalogCard key={e.kind} entry={e} statuses={statuses} />)
+        : ACTION_CATALOG.map((e) => <CatalogCard key={e.kind} entry={e} statuses={statuses} />)}
+    </View>
+  );
+}
+
+function CatalogCard({
+  entry,
+  statuses,
+}: {
+  entry: CatalogEntry<string>;
+  statuses: RoutinesData['statuses'];
+}) {
+  const t = useTheme();
+  const missing = missingPermissions(entry.permissions, statuses);
+  return (
+    <View style={[styles.card, { backgroundColor: t.surface }]}>
+      <Text style={[styles.name, { color: t.text }]}>{entry.title}</Text>
+      <Text style={[styles.sentence, { color: t.text }]}>{entry.summary}</Text>
+      {entry.note && <Text style={[styles.meta, styles.left, { color: t.muted }]}>{entry.note}</Text>}
+      {entry.permissions.length > 0 && (
+        <View style={styles.chips}>
+          {entry.permissions.map((id) => {
+            const ok = !missing.includes(id);
+            return (
+              <Text
+                key={id}
+                style={[styles.chip, { borderColor: ok ? t.muted : t.danger, color: ok ? t.muted : t.danger }, !ok && styles.bold]}
+              >
+                {ok ? '✓ ' : ''}
+                {permissionById(id).label}
+              </Text>
+            );
+          })}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -157,6 +246,13 @@ function capitalize(s: string): string {
 
 const styles = StyleSheet.create({
   root: { paddingHorizontal: 20, paddingBottom: 40 },
+  tabs: { flexDirection: 'row', borderRadius: 999, padding: 4, marginBottom: 16 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999 },
+  tabText: { fontSize: 14, fontWeight: '700' },
+  intro: { fontSize: 14, lineHeight: 20 },
+  left: { textAlign: 'left' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  chip: { fontSize: 12, borderWidth: 1.5, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3 },
   list: { gap: 12 },
   card: { borderRadius: 18, padding: 16, gap: 6 },
   name: { fontSize: 17, fontWeight: '700' },
