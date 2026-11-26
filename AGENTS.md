@@ -17,7 +17,7 @@ App **Android** com um chat por voz ([ADR 0004](docs/decisions/0004-agente-com-a
 3. O texto transcrito vai para o agente, que chama o modelo configurado no OpenRouter, e a resposta aparece na sessão, num balão acima da bolinha.
 4. Tocar na bolinha abre o microfone para o próximo turno. Fechar a sessão apaga a conversa.
 
-O agente ainda não tem tools. A tela inicial do app fica vazia; as Configurações têm a chave de API e o modelo. Fora do MVP: tools (plugins), histórico persistente, modelo local, iOS.
+O agente chama os tools dos plugins ligados (hoje só `routines`). A tela inicial do app fica vazia; as Configurações têm a chave de API, o modelo e o opt-in das rotinas. Fora do MVP: histórico persistente, modelo local, iOS.
 
 Critério de aceite proposto: num Android real configurado com o Edji como assistente padrão e com chave e modelo preenchidos, segurar o botão, fazer uma pergunta e ver a resposta aparecer em partes; tocar na bolinha e fazer uma pergunta que dependa da anterior. Sem chave, a sessão pede a configuração sem chamar a rede.
 
@@ -25,7 +25,7 @@ Critério de aceite proposto: num Android real configurado com o Edji como assis
 
 - Etapa 1 do roteiro concluída: o spike Android (removido da árvore; recuperável no commit `7d16948`) funcionou no Galaxy S26 Ultra (One UI 9), com botão lateral, STT on-device, modo avião e tela bloqueada. Resultado e números em [`docs/decisions/0001-ativacao-pelo-botao-lateral-android.md`](docs/decisions/0001-ativacao-pelo-botao-lateral-android.md). Próximo passo: spike do caminho da voz (etapa 3).
 - Stack, arquitetura de plugins e agente decididos (ADRs 0002, 0003 e 0004). O app Expo em `app/` tem a casca, o núcleo de plugins (sem nenhum plugin; o `todo` foi removido), o agente com AI SDK + OpenRouter e o módulo nativo de voz com chat, caixa de entrada e Headless JS. Testes unitários passam e o Kotlin compila, mas nada disso foi verificado em aparelho (etapa 3). Não descreva funcionalidades como implementadas sem evidência.
-- Rotinas (gatilho → ações criadas pelo agente) e aba Permissões: contratos e entidades definidos na [ADR 0005](docs/decisions/0005-rotinas.md), com tipos, validação e testes em `app/src/plugins/routines/` (ainda fora de `plugins/index.ts`) e a tela `PermissionsScreen`. Motor nativo, monitores de gatilho e tools ainda não existem.
+- Rotinas (gatilho → ações criadas pelo agente por voz) implementadas de ponta a ponta ([ADR 0005](docs/decisions/0005-rotinas.md)): tool calling no agente, plugin `routines` com tools e tela só leitura, motor em Kotlin (`RoutineEngine`, `edji-routines.db`) com gatilhos de Bluetooth, Wi-Fi, lugar, horário e notificação, e aba Permissões. Compila e os testes passam, mas **nada foi verificado em aparelho**: abrir apps com o Edji fechado e a entrega dos gatilhos são hipóteses.
 
 ## Hipótese crítica: ativação pelo botão lateral
 
@@ -59,7 +59,7 @@ app (Expo, TypeScript): casca da interface, aba lateral, configurações, agente
     android/ (Kotlin): serviço de assistente, sessão de voz, STT on-device
     ios/     (Swift): App Intent + Action Button, depois do MVP
   edji.db (JS): plugins ligados, esquemas, dados dos plugins · edji-inbox.db (nativo): caixa de entrada de comandos
-  edji-routines.db (nativo, planejado): rotinas, lugares, execuções e fila do ask_agent (ADR 0005)
+  edji-routines.db (nativo): rotinas, lugares, execuções e fila do ask_agent (ADR 0005)
   expo-secure-store: chave do OpenRouter e ID do modelo
 ```
 
@@ -72,13 +72,12 @@ Contrato completo na [ADR 0003](docs/decisions/0003-arquitetura-de-plugins.md).
 - Dados em tabelas com prefixo do plugin e migrações versionadas.
 - Desligar esconde a interface e tira os tools do registro, mas **preserva os dados**. O estado fica em `plugin_state` no `edji.db`.
 - Exceção (ADR 0005): as rotinas ficam no `edji-routines.db`, do nativo, porque precisam ser lidas com o JS morto.
-- Nenhum plugin registrado por enquanto (o `todo` temporário foi removido; `routines` entra quando houver motor nativo). O agente ainda não usa tools; quando usar, eles vêm dos plugins ligados.
+- Plugin registrado: `routines` (o `todo` temporário foi removido). O agente recebe os tools dos plugins ligados, com o nome `<id>__<ação>` para o modelo; execuções de rotina (`ask_agent`) não recebem os tools de `routines`, para texto de notificação não criar rotinas.
 - **Caminho da voz (hipótese, medir):** a sessão nativa abre o microfone sem JS, inicia um runtime JS em segundo plano enquanto o usuário fala, grava o texto numa caixa de entrada de comandos (com `session_id`) e o JS roda o agente, empurrando a resposta parcial com `pushReply`. Fechar a sessão cancela o comando; nada é reprocessado depois.
 
 ## Questões em aberto
 
 - **Rotinas no aparelho (ADR 0005):** abrir app ou link com o Edji fechado (isenção de assistente, `CompanionDeviceManager` ou notificação para tocar); entrega dos gatilhos com o app morto; suspensão de apps da Samsung. Validar num spike no S26.
-- **Tools com várias ações:** o `ParameterSchema` só tem campos planos; decidir entre objetos/listas ou rascunho em JSON no `routines.create`.
 
 - **STT no aparelho:** reconhecimento on-device do Android (`SpeechRecognizer`), whisper.cpp ou Vosk. Critérios: português, latência, tamanho do modelo e funcionamento offline. Para o MVP, o reconhecimento do sistema pode bastar se funcionar offline.
 - **Tools no agente (pós-MVP):** tool calling pelo AI SDK com os tools dos plugins ligados; avaliar também um modelo local.
@@ -170,9 +169,9 @@ Consulte `docs/references/edji-brandbook-01.html` (Brandbook 01, conceito v1.0) 
     - `theme/`: paleta da marca e `useTheme`.
     - `agent/`: agente (`agent.ts`: `streamText`, instruções, mensagens de erro), provedor (`openrouter.ts`, com `expo/fetch`), chave e modelo (`settings.ts`, `expo-secure-store`).
     - `core/`: contrato de plugin (`plugin.ts`), registro (`registry.ts`), banco e migrações (`db.ts`), eventos, execução da caixa de entrada (`runtime.ts`, `headless.ts`), catálogo de permissões (`permissions.ts`) e leitura/pedido no Android (`devicePermissions.ts`).
-    - `plugins/`: plugins; registre novos em `plugins/index.ts` (hoje vazio). `routines/`: tipos, validação (`schema.ts`), frase em português (`describe.ts`) e permissões por rotina (`requirements.ts`), ainda não registrado.
+    - `plugins/`: plugins; registre novos em `plugins/index.ts`. `routines/`: tipos, validação (`schema.ts`), frase em português (`describe.ts`), permissões por rotina (`requirements.ts`), tools (`tools.ts`), tela só leitura (`RoutinesView`, `useRoutines`, `format.ts`).
     - Testes em `__tests__/` ao lado do código.
-  - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz em chat (`EdjiSession`), STT, caixa de entrada (`CommandInbox`, versão 2 com `session_id`), `EdjiCommandTaskService` (Headless JS) e ponte JS (`index.ts`: `pendingCommands`, `pushReply`, `completeCommand`; funções de rotinas e permissões declaradas como opcionais, ainda sem Kotlin).
+  - `modules/edji-assistant/`: módulo nativo local (Kotlin): serviço de assistente, sessão de voz em chat (`EdjiSession`), STT, caixa de entrada (`CommandInbox`, versão 2 com `session_id`), `EdjiCommandTaskService` (Headless JS) ponte JS (`index.ts`: `pendingCommands`, `pushReply`, `completeCommand`, rotinas e permissões) e rotinas: `RoutineStore` (`edji-routines.db`), `RoutineJson` (segunda validação), `RoutineEngine` (registra gatilhos e despacha eventos), `ActionRunner`, `RoutineTriggerReceiver` (Bluetooth, boot; exportado só para broadcasts protegidos), `RoutineInternalReceiver` (alarmes, proximidade, rede, fila), `EdjiNotificationListener`, `DevicePermissions` e `DeviceInfo`.
   - Jest: `transformIgnorePatterns` no `package.json` inclui `ai`, `@ai-sdk`, `@openrouter` e `@workflow`, que são ESM. Para compilar o Kotlin: `npx expo prebuild --platform android` e `./gradlew :edji-assistant:compileDebugKotlin` em `app/android`, com `JAVA_HOME` apontando para o JDK do Android Studio.
 - Spike de ativação (removido): ficou no commit `7d16948`. Lição que vale manter: o Android só lista um assistente que declara `recognitionService`, então há um stub (`EdjiRecognitionService`); por isso o reconhecimento nunca usa o reconhecedor padrão e escolhe explicitamente o on-device ou outro serviço.
 - `docs/decisions/`: ADRs. `0001`: ativação pelo botão lateral no Android. `0002`: stack React Native + Expo. `0003`: arquitetura de plugins. `0004`: agente com AI SDK e OpenRouter. `0005`: rotinas e aba Permissões (emenda a 0003 no armazenamento).

@@ -1,5 +1,6 @@
 import { ScrollView, Switch, Text, View } from 'react-native';
 import { ModelSettings } from '@/components/settings/ModelSettings';
+import { RoutinesSettings } from '@/components/settings/RoutinesSettings';
 import { settingsStyles as styles } from '@/components/settings/styles';
 import { getDb, setPluginEnabled } from '@/core/db';
 import type { Plugin } from '@/core/plugin';
@@ -8,7 +9,7 @@ import { useTheme } from '@/theme';
 
 type Props = { plugins: Plugin[]; states: PluginStates; onStatesChanged(): void };
 
-/** Model provider (key and model) and plugin switches. Device permissions live in `PermissionsScreen`. */
+/** Model provider (key and model), the routines opt-in and plugin switches. Device permissions live in `PermissionsScreen`. */
 export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
   const t = useTheme();
   const toggle = async (p: Plugin, value: boolean) => {
@@ -19,6 +20,7 @@ export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <ModelSettings />
+      <RoutinesSettings />
 
       {plugins.length > 0 && (
         <>

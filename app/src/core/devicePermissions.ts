@@ -10,17 +10,20 @@ const ANDROID_RUNTIME: Partial<Record<PermissionId, AndroidPermission>> = {
   notifications: PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
   nearby_devices: PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
   fine_location: PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+  // Android 11+ answers this request by opening the location screen ("Permitir o tempo todo").
+  background_location: PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
 };
 
 /**
- * Current status of every permission. The microphone and the assistant role
- * are read today; the others come from the native `permissionStatus` once it
- * exists, and are `unavailable` until then (ADR 0005).
+ * Current status of every permission, from the native side (ADR 0005).
+ * Everything is `unavailable` where there is no native module.
  */
 export async function readPermissionStatuses(): Promise<PermissionStatuses> {
   const statuses = Object.fromEntries(PERMISSIONS.map((p) => [p.id, 'unavailable'])) as PermissionStatuses;
   if (Platform.OS !== 'android' || !EdjiAssistant) return statuses;
 
+  // Permissions may have changed in the Android settings: the routine triggers depend on them.
+  EdjiAssistant.syncRoutines?.();
   const native = EdjiAssistant.permissionStatus?.(PERMISSIONS.map((p) => p.id));
   if (native) Object.assign(statuses, native);
   statuses.microphone = (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO)) ? 'granted' : 'denied';

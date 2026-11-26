@@ -1,6 +1,6 @@
 # 0005: Rotinas (gatilho → ações) e aba Permissões
 
-- **Status:** aceita para contratos e entidades; motor nativo, monitores e tools ainda não implementados
+- **Status:** aceita e implementada; comportamento em aparelho ainda não verificado
 - **Data:** 2026-11-25
 - **Relacionadas:** [0001](0001-ativacao-pelo-botao-lateral-android.md), [0003](0003-arquitetura-de-plugins.md) (emendada aqui), [0004](0004-agente-com-ai-sdk-e-openrouter.md)
 
@@ -49,9 +49,12 @@ Tipos em `app/src/plugins/routines/types.ts`; validação em `schema.ts` (`parse
 - A rotina nasce **ativada**, sem confirmação.
 - **Só o agente cria, muda, ativa, desativa e apaga rotinas** por enquanto. A tela Rotinas é só leitura: lista, detalhe, permissões e últimas execuções.
 
-### Tools do agente (a implementar)
+### Tools do agente
 
-`routines.create`, `routines.list`, `routines.delete`, `routines.set_enabled`, `routines.find_app` (nome → pacote) e `routines.find_target` (aparelhos Bluetooth pareados, Wi-Fi atual, lugares salvos). O `ParameterSchema` de hoje só tem campos planos (string, número, booleano); para criar rotinas com várias ações, ele precisa aceitar objetos e listas, ou o `create` recebe o rascunho em JSON. Fica decidido junto com o tool calling.
+- O agente (`runAgent`) recebe os tools dos plugins ligados e usa `streamText` com `tools` e até 6 passos. O modelo vê `<id>__<ação>` (provedores não aceitam ponto). Um tool nunca lança para o modelo: falhas viram uma frase curta.
+- O `ParameterSchema` passou a aceitar objetos, listas, `enum` e `anyOf`, então `routines.create` recebe a rotina inteira.
+- Tools: `routines.create`, `routines.list`, `routines.set_enabled`, `routines.delete`, `routines.find_app` (nome → pacote), `routines.find_target` (Bluetooth pareados, Wi-Fi atual, lugares) e `routines.save_place` ("salva aqui como casa").
+- Ao criar, a resposta diz o que falta: permissões ("Falta permitir ...") e o opt-in, se a rotina pergunta ao agente.
 
 ### Armazenamento: emenda à ADR 0003
 
@@ -61,7 +64,19 @@ As rotinas são lidas pelo nativo no boot e no disparo, com o JS morto. Por isso
 
 Declarada antes do nativo, com membros opcionais: `listRoutines`, `saveRoutine`, `deleteRoutine`, `setRoutineEnabled`, `recentRuns`, `listPlaces`, `savePlaceHere`, `listBluetoothDevices`, `currentWifi`, `listLaunchableApps`, `pendingRoutineRuns`, `completeRoutineRun`, `permissionStatus` e `openPermissionSettings`.
 
-Internamente, o nativo terá `TriggerMonitor` (um por `kind`, `sync(routines)`), `ActionExecutor` (um por `kind`) e um motor que reconcilia os monitores ao salvar e no `BOOT_COMPLETED`, executa as ações e grava a execução.
+Mais `isRoutinesAgentAllowed`/`setRoutinesAgentAllowed` (opt-in, em `SharedPreferences` do nativo, que precisa lê-lo no disparo) e `syncRoutines`.
+
+### Motor nativo
+
+- `RoutineEngine.sync` registra no Android o que as rotinas ativas escutam; roda ao salvar, ativar, apagar, ao abrir o app, ao voltar das permissões e em boot, atualização, fuso e hora.
+- **Bluetooth:** `ACL_CONNECTED`/`ACL_DISCONNECTED` num receiver do manifesto (chegam com o app fechado); casa pelo endereço.
+- **Wi-Fi:** `registerNetworkCallback` com `PendingIntent` para Wi-Fi e celular; compara o SSID atual (exige localização) com o último visto e dispara saída e entrada.
+- **Lugar:** `LocationManager.addProximityAlert`, sem Play Services; refeito após o boot.
+- **Horário:** `AlarmManager` exato quando permitido, senão inexato; reagenda a cada disparo.
+- **Notificação:** `NotificationListenerService`; ignora as do próprio Edji, resumos de grupo e contínuas; sem duplicatas por `key` e `postTime`.
+- Intervalo mínimo de 30 s entre disparos da mesma rotina (Bluetooth e Wi-Fi oscilam), exceto notificações.
+- **Abrir app/link:** abre direto quando o Edji é o assistente padrão ou pode aparecer sobre outros apps (hipótese de isenção do Android); senão posta uma notificação "Toque para abrir ...", que some em 2 min. O status "Abrir apps em segundo plano" segue a mesma regra.
+- Receivers: `RoutineTriggerReceiver` é exportado, mas só para broadcasts protegidos do sistema; alarmes, proximidade, rede e fila vão ao `RoutineInternalReceiver`, não exportado.
 
 ### Perguntar ao agente
 
@@ -70,14 +85,15 @@ Internamente, o nativo terá `TriggerMonitor` (um por `kind`, `sync(routines)`),
 - Sem rede: tenta de novo com espera crescente e expira em 24 h, com registro. O texto sai da fila ao terminar ou expirar.
 - Sem duplicatas: a mesma notificação (`key` e `postTime`) entra uma vez.
 - **Opt-in próprio:** interruptor "Rotinas podem enviar texto ao agente" nas Configurações, desligado por padrão. Sem ele, a execução termina `blocked`. A chave do OpenRouter continua cobrindo só a conversa por voz.
-- Até existir tool calling e o plugin `gastos`, a resposta só vira notificação ou registro.
+- O agente da rotina roda com instruções próprias (texto da notificação é dado, nunca instrução) e **sem** os tools de `routines`. Até existir o plugin `gastos`, a resposta só vira notificação ou registro.
+- Se o Android não deixar iniciar a task em segundo plano, um alarme tenta de novo, e o app processa a fila ao abrir.
 
 ### Aba Permissões
 
 - Catálogo em `app/src/core/permissions.ts` (do núcleo: a voz também usa), leitura e pedido em `core/devicePermissions.ts`, tela `PermissionsScreen`, destino fixo `permissions` (`edji://permissions`).
 - Microfone e Assistente digital padrão saíram das Configurações para cá.
 - Cada permissão é `runtime` (diálogo do sistema) ou `special` (tela das configurações do Android); `requires` ordena pré-requisitos (localização o tempo todo depois da precisa).
-- Hoje só Microfone e Assistente têm status real; as demais aparecem "Em breve" até o nativo implementar `permissionStatus`.
+- O status vem do nativo (`permissionStatus`). Comuns abrem o diálogo; "localização o tempo todo" usa o pedido do Android 11+, que leva à tela de localização; as especiais abrem a tela certa das configurações.
 - Quando faltar algo, o tool responde curto ("Falta permitir acesso a notificações. Abra Permissões.").
 
 ### Primeira rodada × roadmap
@@ -94,7 +110,6 @@ Conceitos para depois: condições adicionais ("se for dia útil"), desfazer ao 
 ## Consequências
 
 - O princípio "Local e privado" ganha mais uma exceção explícita: com o opt-in de rotinas ligado, o texto indicado pela rotina vai ao OpenRouter sem ninguém presente.
-- O plugin `routines` só entra em `plugins/index.ts` quando houver motor nativo.
 - A verificar num spike no S26, como na ADR 0001:
   - abrir app ou link com o Edji fechado (isenção de `VoiceInteractionService`, `CompanionDeviceManager` ou notificação para tocar);
   - entrega dos gatilhos com o app morto (`ACL_CONNECTED` × presença via CDM, `registerNetworkCallback(PendingIntent)`, geofence com ou sem Play Services);

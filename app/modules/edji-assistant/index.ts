@@ -29,12 +29,13 @@ type EdjiAssistantNative = {
   isAssistant(): boolean;
   openAssistantSettings(): void;
   addListener(event: 'onLog', listener: (e: { line: string }) => void): EventSubscription;
-} & Partial<RoutinesNative>;
+} & RoutinesNative;
 
 /**
- * Routines and permissions bridge (ADR 0005). Declared before the native
- * side exists, so every member is optional: callers check before calling.
- * Routines live in `edji-routines.db`, which only the native side opens.
+ * Routines and permissions bridge (ADR 0005). Routines live in
+ * `edji-routines.db`, which only the native side opens; it validates every
+ * routine again and registers the triggers. Errors reject with a short
+ * Portuguese message.
  */
 type RoutinesNative = {
   listRoutines(): Promise<Routine[]>;
@@ -52,10 +53,19 @@ type RoutinesNative = {
   listLaunchableApps(): Promise<{ packageName: string; label: string }[]>;
   /** `ask_agent` firings waiting for the JS runtime. Text leaves the queue once completed or expired. */
   pendingRoutineRuns(): Promise<PendingRoutineRun[]>;
-  completeRoutineRun(id: number, outcome: RunOutcome, detail: string): Promise<boolean>;
+  /**
+   * Reports an `ask_agent` firing. `retry` keeps it queued (no network) until
+   * it expires; [notifyText] is shown as a notification when the routine asked for it.
+   */
+  completeRoutineRun(id: number, outcome: RunOutcome | 'retry', detail: string, notifyText: string | null): Promise<boolean>;
+  /** Whether routines may send text to the agent with nobody present. Off by default. */
+  isRoutinesAgentAllowed(): boolean;
+  setRoutinesAgentAllowed(allowed: boolean): void;
   permissionStatus(ids: PermissionId[]): Record<PermissionId, PermissionStatus>;
   /** Opens the Android screen where the user grants a special permission. */
   openPermissionSettings(id: PermissionId): void;
+  /** Registers the routine triggers again (after a permission changed). */
+  syncRoutines(): void;
 };
 
 /** An `ask_agent` firing: the prompt with the trigger variables already filled in. */

@@ -63,6 +63,52 @@ describe('runAgent', () => {
     expect(turns).toEqual(messages);
   });
 
+  it('calls a plugin tool and then answers with what it returned', async () => {
+    const steps: Part[][] = [
+      [
+        { type: 'stream-start', warnings: [] },
+        { type: 'tool-call', toolCallId: 'c1', toolName: 'routines__set_enabled', input: '{"id":"r1","enabled":false}' },
+        { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
+      ] as Part[],
+      [
+        { type: 'stream-start', warnings: [] },
+        { type: 'text-start', id: 't' },
+        { type: 'text-delta', id: 't', delta: 'Desativei a rotina do carro.' },
+        { type: 'text-end', id: 't' },
+        { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage },
+      ] as Part[],
+    ];
+    let step = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({ stream: simulateReadableStream({ chunks: steps[step++] }) as never }),
+    });
+    const execute = jest.fn(async () => ({ ok: true, reply: 'Rotina "Spotify no carro" desativada.' }));
+    const result = await runAgent({
+      messages: ask('desativa a rotina do carro'),
+      settings,
+      createModel: () => model,
+      tools: [
+        {
+          name: 'routines.set_enabled',
+          description: 'Ativa ou desativa uma rotina.',
+          parameters: { type: 'object', properties: { id: { type: 'string' }, enabled: { type: 'boolean' } }, required: ['id', 'enabled'] },
+          execute,
+        },
+      ],
+    });
+
+    expect(execute).toHaveBeenCalledWith({ id: 'r1', enabled: false });
+    expect(result).toEqual({ status: 'done', reply: 'Desativei a rotina do carro.' });
+    expect(model.doStreamCalls[0].tools?.map((t) => t.name)).toEqual(['routines__set_enabled']);
+    expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('Rotina \\"Spotify no carro\\" desativada.');
+  });
+
+  it('offers no tools when none are given', async () => {
+    const model = textModel(['Oi.']);
+    await runAgent({ messages: ask('oi'), settings, createModel: () => model, tools: [] });
+    expect(model.doStreamCalls[0].tools).toBeUndefined();
+  });
+
   it('passes the key and the model id to the provider', async () => {
     const createModel = jest.fn(() => textModel(['Oi.']));
     await runAgent({ messages: ask('oi'), settings, createModel });

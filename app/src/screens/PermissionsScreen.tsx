@@ -14,7 +14,8 @@ export function PermissionsScreen() {
   return (
     <ScrollView contentContainerStyle={settingsStyles.root}>
       <Text style={[styles.intro, { color: t.muted }]}>
-        {missing === 0 ? 'Tudo o que o Edji já usa está permitido.' : `Faltam ${missing} de ${known.length}.`}
+        {missing === 0 ? 'Tudo permitido.' : `Faltam ${missing} de ${known.length}.`} Cada rotina diz o que precisa; sem a permissão,
+        ela não roda e o Edji avisa.
       </Text>
 
       {PERMISSION_GROUPS.map((g) => (
@@ -46,7 +47,7 @@ function PermissionRow({ permission: p, status, onRequest }: RowProps) {
   return (
     <View style={styles.row}>
       <View
-        accessibilityLabel={granted ? 'Permitida' : denied ? 'Faltando' : 'Em breve'}
+        accessibilityLabel={granted ? 'Permitida' : denied ? 'Faltando' : 'Indisponível'}
         style={[
           styles.mark,
           granted && { backgroundColor: t.accent },
@@ -60,7 +61,7 @@ function PermissionRow({ permission: p, status, onRequest }: RowProps) {
         <Text style={[settingsStyles.label, { color: t.text }]}>{p.label}</Text>
         <Text style={[settingsStyles.meta, { color: t.muted }]}>
           {p.recommended ? `Recomendada. ${p.reason}` : p.reason}
-          {status === 'unavailable' ? ' Em breve.' : ''}
+          {status === 'unavailable' ? ' Indisponível neste aparelho.' : ''}
         </Text>
       </View>
       {denied && (
