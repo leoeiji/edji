@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AppState, PermissionsAndroid, Platform, ScrollView, Switch, Text, View } from 'react-native';
-import { EdjiAssistant } from '../../modules/edji-assistant';
+import { ScrollView, Switch, Text, View } from 'react-native';
 import { ModelSettings } from '@/components/settings/ModelSettings';
-import { StatusRow } from '@/components/settings/StatusRow';
+import { RoutinesSettings } from '@/components/settings/RoutinesSettings';
 import { settingsStyles as styles } from '@/components/settings/styles';
 import { getDb, setPluginEnabled } from '@/core/db';
 import type { Plugin } from '@/core/plugin';
@@ -11,25 +9,9 @@ import { useTheme } from '@/theme';
 
 type Props = { plugins: Plugin[]; states: PluginStates; onStatesChanged(): void };
 
-/** Model provider (key and model), assistant setup (mic, default assistant, side button) and plugin switches. */
+/** Model provider (key and model), the routines opt-in and plugin switches. Device permissions live in `PermissionsScreen`. */
 export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
   const t = useTheme();
-  const [mic, setMic] = useState<boolean | null>(null);
-  const [assistant, setAssistant] = useState<boolean | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (Platform.OS === 'android') {
-      setMic(await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO));
-    }
-    setAssistant(EdjiAssistant?.isAssistant() ?? null);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const sub = AppState.addEventListener('change', (s) => s === 'active' && refresh());
-    return () => sub.remove();
-  }, [refresh]);
-
   const toggle = async (p: Plugin, value: boolean) => {
     await setPluginEnabled(await getDb(), p.id, value);
     onStatesChanged();
@@ -38,29 +20,7 @@ export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
   return (
     <ScrollView contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <ModelSettings />
-
-      <Text style={[styles.section, { color: t.muted }]}>Botão lateral</Text>
-      <View style={[styles.card, { backgroundColor: t.surface }]}>
-        <StatusRow
-          label="Microfone"
-          ok={mic}
-          action="Permitir"
-          onPress={async () => {
-            await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-            refresh();
-          }}
-        />
-        <StatusRow
-          label="Assistente digital padrão"
-          ok={assistant}
-          action="Configurar"
-          onPress={() => EdjiAssistant?.openAssistantSettings()}
-        />
-        <Text style={[styles.hint, { color: t.muted }]}>
-          No Galaxy: Configurações → Recursos avançados → Botão lateral → Pressionar e manter → Assistente digital. O menu
-          de desligar passa a ficar no painel rápido.
-        </Text>
-      </View>
+      <RoutinesSettings />
 
       {plugins.length > 0 && (
         <>

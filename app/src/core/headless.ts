@@ -1,11 +1,12 @@
 import { assistantLog } from '../../modules/edji-assistant';
-import { ensureReady, processPendingCommands } from './runtime';
+import { ensureReady, processPendingCommands, processPendingRoutineRuns } from './runtime';
 
 type TaskData = { reason?: string; requestedAt?: number; commandId?: number };
 
 /**
  * Headless JS task `EdjiCommand`. `warmup` boots the runtime and the database
- * while the user is still speaking; `command` runs the pending inbox.
+ * while the user is still speaking; `command` runs the pending inbox;
+ * `routine` runs the queued `ask_agent` firings of routines.
  */
 export async function headlessCommandTask(data: TaskData): Promise<void> {
   const startedAt = Date.now();
@@ -15,6 +16,11 @@ export async function headlessCommandTask(data: TaskData): Promise<void> {
     await ensureReady();
     if (data.reason === 'warmup') {
       assistantLog(`js: aquecido em ${Date.now() - startedAt} ms`);
+      return;
+    }
+    if (data.reason === 'routine') {
+      const n = await processPendingRoutineRuns();
+      assistantLog(`js: ${n} execução(ões) de rotina em ${Date.now() - startedAt} ms`);
       return;
     }
     const n = await processPendingCommands();

@@ -11,12 +11,23 @@ export type PluginContext = {
 /** Result of running a tool: a short reply for the voice session ("Anotado."). */
 export type ToolResult = { ok: boolean; reply: string };
 
-/** Subset of JSON Schema used to describe tool parameters to the agent. */
-export type ParameterSchema = {
+/** Subset of JSON Schema for one value. Nested objects and lists describe richer inputs, like a routine. */
+export type ValueSchema =
+  | { type: 'string'; description?: string; enum?: string[] }
+  | { type: 'number' | 'integer' | 'boolean'; description?: string }
+  | { type: 'array'; description?: string; items: ValueSchema; minItems?: number; maxItems?: number }
+  | ObjectSchema
+  | { anyOf: ValueSchema[]; description?: string };
+
+export type ObjectSchema = {
   type: 'object';
-  properties: Record<string, { type: 'string' | 'number' | 'boolean'; description: string }>;
+  description?: string;
+  properties: Record<string, ValueSchema>;
   required?: string[];
 };
+
+/** Subset of JSON Schema used to describe tool parameters to the agent. */
+export type ParameterSchema = ObjectSchema;
 
 /** An action the agent can call. `name` is namespaced: `<pluginId>.<action>`. */
 export type Tool<P = Record<string, unknown>> = {
@@ -47,4 +58,9 @@ export type Plugin = {
   tools?: Tool<any>[];
   view?: PluginView;
   migrations?: Migration[];
+  /**
+   * Called with the plugin's state at startup and whenever the user flips
+   * its switch, for plugins with work outside JS (e.g. native triggers).
+   */
+  onEnabledChange?(enabled: boolean): void | Promise<void>;
 };

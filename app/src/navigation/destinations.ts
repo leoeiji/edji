@@ -7,6 +7,7 @@ export const HOME: Destination = { key: 'home', title: 'Início' };
 
 export const FIXED: Destination[] = [
   { key: 'settings', title: 'Configurações' },
+  { key: 'permissions', title: 'Permissões' },
   { key: 'log', title: 'Registro' },
 ];
 

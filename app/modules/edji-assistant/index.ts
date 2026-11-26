@@ -1,4 +1,6 @@
 import { requireOptionalNativeModule, type EventSubscription } from 'expo-modules-core';
+import type { PermissionId, PermissionStatus } from '../../src/core/permissions';
+import type { BluetoothDevice, Place, Routine, RoutineDraft, RoutineRun, RunOutcome } from '../../src/plugins/routines/types';
 
 /** A finished turn of the current voice session. */
 export type Turn = { role: 'user' | 'assistant'; content: string };
@@ -27,7 +29,49 @@ type EdjiAssistantNative = {
   isAssistant(): boolean;
   openAssistantSettings(): void;
   addListener(event: 'onLog', listener: (e: { line: string }) => void): EventSubscription;
+} & RoutinesNative;
+
+/**
+ * Routines and permissions bridge (ADR 0005). Routines live in
+ * `edji-routines.db`, which only the native side opens; it validates every
+ * routine again and registers the triggers. Errors reject with a short
+ * Portuguese message.
+ */
+type RoutinesNative = {
+  listRoutines(): Promise<Routine[]>;
+  /** Validates again, stores (enabled) and registers the trigger. Rejects with a short Portuguese reason. */
+  saveRoutine(draft: RoutineDraft): Promise<Routine>;
+  deleteRoutine(id: string): Promise<boolean>;
+  setRoutineEnabled(id: string, enabled: boolean): Promise<boolean>;
+  recentRuns(limit: number): Promise<RoutineRun[]>;
+  listPlaces(): Promise<Place[]>;
+  /** Saves the current location as a place. */
+  savePlaceHere(name: string): Promise<Place>;
+  /** Paired devices only. */
+  listBluetoothDevices(): Promise<BluetoothDevice[]>;
+  currentWifi(): Promise<{ ssid: string } | null>;
+  listLaunchableApps(): Promise<{ packageName: string; label: string }[]>;
+  /** `ask_agent` firings waiting for the JS runtime. Text leaves the queue once completed or expired. */
+  pendingRoutineRuns(): Promise<PendingRoutineRun[]>;
+  /**
+   * Reports an `ask_agent` firing. `retry` keeps it queued (no network) until
+   * it expires; [notifyText] is shown as a notification when the routine asked for it.
+   */
+  completeRoutineRun(id: number, outcome: RunOutcome | 'retry', detail: string, notifyText: string | null): Promise<boolean>;
+  /** Whether routines may send text to the agent with nobody present. Off by default. */
+  isRoutinesAgentAllowed(): boolean;
+  setRoutinesAgentAllowed(allowed: boolean): void;
+  /** Pauses every routine (the Rotinas plugin is off) or resumes them. */
+  setRoutinesPaused(paused: boolean): Promise<void>;
+  permissionStatus(ids: PermissionId[]): Record<PermissionId, PermissionStatus>;
+  /** Opens the Android screen where the user grants a special permission. */
+  openPermissionSettings(id: PermissionId): void;
+  /** Registers the routine triggers again (after a permission changed). */
+  syncRoutines(): void;
 };
+
+/** An `ask_agent` firing: the prompt with the trigger variables already filled in. */
+export type PendingRoutineRun = { id: number; routineId: string; prompt: string; reply: 'silent' | 'notify'; firedAt: number };
 
 /**
  * Native voice module (Android only). `null` where it isn't available

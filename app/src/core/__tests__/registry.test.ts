@@ -1,5 +1,5 @@
 import type { Plugin, Tool } from '../plugin';
-import { availableTools, enabledPlugins, isEnabled, validatePlugins } from '../registry';
+import { applyEnabledStates, availableTools, enabledPlugins, isEnabled, validatePlugins } from '../registry';
 
 const tool = (name: string): Tool => ({
   name,
@@ -44,5 +44,14 @@ describe('registry', () => {
   it('requires migrations numbered from 1 without gaps', () => {
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 2, sql: '' }] }])).toThrow('numbered');
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 1, sql: '' }, { version: 2, sql: '' }] }])).not.toThrow();
+  });
+});
+
+describe('applyEnabledStates', () => {
+  it('tells each plugin whether it is on, and survives a failing hook', async () => {
+    const onEnabledChange = jest.fn();
+    const broken = { ...agenda, onEnabledChange: () => Promise.reject(new Error('no native')) };
+    await applyEnabledStates([{ ...todo, onEnabledChange }, broken], { todo: false });
+    expect(onEnabledChange).toHaveBeenCalledWith(false);
   });
 });
