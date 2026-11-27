@@ -43,6 +43,7 @@ const mockNative = {
   completeCommand: jest.fn(async () => true),
   pushReply: jest.fn(() => true),
   pushTool: jest.fn(() => true),
+  markSaved: jest.fn(() => true),
   isWaiting: jest.fn(() => true),
   heartbeat: jest.fn(() => true),
   log: jest.fn(),
@@ -80,6 +81,7 @@ describe('voice commands with saving on', () => {
     expect(await loadMessages(await getDb(), conversation.id)).toHaveLength(4);
     expect(JSON.stringify(mockPrompts[1])).toContain('R$ 842,30.');
     expect(mockNative.completeCommand).toHaveBeenLastCalledWith(2, 'done', 'Em outubro foram R$ 751,10.');
+    expect(mockNative.markSaved).toHaveBeenCalledWith(2);
   });
 
   it('shows each tool call in the session with its Portuguese label', async () => {
@@ -105,6 +107,7 @@ describe('voice commands with saving off', () => {
       .mockResolvedValueOnce([]);
     await processPendingCommands();
     expect(await listConversations(await getDb())).toEqual([]);
+    expect(mockNative.markSaved).not.toHaveBeenCalled();
     expect(JSON.stringify(mockPrompts[0])).toContain('Olá.');
   });
 });

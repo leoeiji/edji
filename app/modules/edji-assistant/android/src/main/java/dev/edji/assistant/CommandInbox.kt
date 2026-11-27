@@ -40,6 +40,7 @@ class CommandInbox private constructor(context: Context) :
         val onHeartbeat: () -> Unit,
         val onDone: (status: String, reply: String) -> Unit,
         val onTool: (toolCallId: String, label: String, state: String) -> Unit = { _, _, _ -> },
+        val onSaved: () -> Unit = {},
     )
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -135,6 +136,13 @@ class CommandInbox private constructor(context: Context) :
         val waiter = waiters[id] ?: return false
         waiter.onTool(toolCallId, label, state)
         waiter.onHeartbeat()
+        return true
+    }
+
+    /** Tells the waiting session its conversation is saved in the app, so it can offer to open it. */
+    fun saved(id: Long): Boolean {
+        val waiter = waiters[id] ?: return false
+        waiter.onSaved()
         return true
     }
 

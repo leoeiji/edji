@@ -134,6 +134,7 @@ async function answer(c: PendingCommand): Promise<Answer> {
         (await findVoiceConversation(db, c.sessionId)) ??
         (await createConversation(db, { title: fallbackTitle(c.text), origin: 'voice', voiceSessionId: c.sessionId }));
       const result = await runPersistedTurn({ db, conversationId: conversation.id, userText: c.text, settings, ...live });
+      assistant.markSaved(c.id);
       return {
         result,
         afterReply: () => titleConversation(db, conversation, c.text, result, { settings, createModel: openRouterModel }),

@@ -20,6 +20,7 @@ const mockNative = {
   completeCommand: jest.fn(async () => true),
   pushReply: jest.fn(() => true),
   pushTool: jest.fn(() => true),
+  markSaved: jest.fn(() => true),
   isWaiting: jest.fn(() => true),
   heartbeat: jest.fn(() => true),
   log: jest.fn(),

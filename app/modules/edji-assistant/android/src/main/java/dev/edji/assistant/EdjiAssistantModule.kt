@@ -69,6 +69,9 @@ class EdjiAssistantModule : Module() {
             CommandInbox.get(context).tool(id.toLong(), toolCallId, label, state)
         }
 
+        /** The command's turn was saved as a conversation: the session offers "Abrir no Edji". */
+        Function("markSaved") { id: Double -> CommandInbox.get(context).saved(id.toLong()) }
+
         /** Whether the session still waits for the command. Doesn't extend its deadline. */
         Function("isWaiting") { id: Double -> CommandInbox.get(context).isWaiting(id.toLong()) }
 

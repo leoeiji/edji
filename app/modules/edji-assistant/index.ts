@@ -34,6 +34,8 @@ type EdjiAssistantNative = {
   pushReply(id: number, textSoFar: string): boolean;
   /** Shows a tool call as a chip in the session, with a ready-made Portuguese label. False once nobody is waiting. */
   pushTool(id: number, toolCallId: string, label: string, state: ToolChipState): boolean;
+  /** Tells the session its turn was saved as a conversation, so it offers "Abrir no Edji". */
+  markSaved(id: number): boolean;
   /** Whether the session still waits for this command. Doesn't extend its deadline. */
   isWaiting(id: number): boolean;
   /** Tells the session the model is still working (e.g. reasoning). Returns false once nobody is waiting. */

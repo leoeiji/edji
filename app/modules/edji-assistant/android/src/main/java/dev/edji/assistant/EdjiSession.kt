@@ -27,13 +27,15 @@ import java.util.UUID
  *
  * Each turn: open the mic natively (no JS), show the transcript as it comes,
  * write it to [CommandInbox] and wait while the JS agent streams the model's
- * reply into the bubble above the orb. Tapping the orb starts the next turn;
- * the mic never reopens on its own. Closing the session cancels whatever is
- * pending and forgets the conversation.
+ * reply into the bubble above the wheel, with a chip per tool call. The wheel
+ * ([VoiceWheel]) trembles with the voice while listening. Tapping it starts
+ * the next turn; the mic never reopens on its own. Closing the session
+ * cancels whatever is pending; the conversation stays in the app's history
+ * when the JS side saved it ("Abrir no Edji"), and is gone otherwise.
  */
 class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCapture.Listener {
 
-    private enum class State { LISTENING, THINKING, IDLE }
+    private enum class State { LISTENING, THINKING, REPLYING, IDLE }
 
     private val main = Handler(Looper.getMainLooper())
     private var capture: VoiceCapture? = null
@@ -44,9 +46,13 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
 
     private var scroll: ScrollView? = null
     private var messages: LinearLayout? = null
-    private var halo: View? = null
-    private var bars: List<View> = emptyList()
+    private var wheel: VoiceWheel? = null
     private var status: TextView? = null
+    private var openInApp: TextView? = null
+    /** Whether the JS side saved this session as a conversation (ADR 0006). */
+    private var saved = false
+    /** Tool chips of the current turn, by tool call id. */
+    private val chips = mutableMapOf<String, TextView>()
     private var userBubble: TextView? = null
     private var replyBubble: TextView? = null
 
@@ -83,41 +89,17 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         }
         sheet.addView(scrollView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // The orb: five mint bars on pine, with a soft halo while listening.
-        val orbSize = px(96)
-        val orb = FrameLayout(ctx).apply {
+        // The wheel: pine disc, mint ring and the five bars; it trembles with the voice.
+        val wheelSize = px(132)
+        val wheelView = VoiceWheel(ctx).apply {
             contentDescription = "Falar de novo"
-            setOnClickListener { if (state == State.IDLE) startListening() }
+            setOnClickListener { if (this@EdjiSession.state == State.IDLE) startListening() }
         }
-        val haloView = View(ctx).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(HALO)
-            }
-        }
-        orb.addView(haloView, FrameLayout.LayoutParams(orbSize, orbSize))
-        val core = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(PINE)
-            }
-        }
-        val barViews = BAR_HEIGHTS_DP.map { h ->
-            View(ctx).apply {
-                background = GradientDrawable().apply {
-                    setColor(MINT)
-                    cornerRadius = 3 * density
-                }
-            }.also { core.addView(it, LinearLayout.LayoutParams(px(5), px(h)).apply { setMargins(px(2), 0, px(2), 0) }) }
-        }
-        orb.addView(core, FrameLayout.LayoutParams(px(72), px(72), Gravity.CENTER))
         sheet.addView(
-            orb,
-            LinearLayout.LayoutParams(orbSize, orbSize).apply {
+            wheelView,
+            LinearLayout.LayoutParams(wheelSize, wheelSize).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = px(28)
+                topMargin = px(20)
             },
         )
 
@@ -132,13 +114,31 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(12) },
         )
 
+        val openView = TextView(ctx).apply {
+            text = "Abrir no Edji"
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(PINE)
+            gravity = Gravity.CENTER
+            minHeight = px(44)
+            visibility = View.GONE
+            setOnClickListener { openConversation() }
+        }
+        sheet.addView(
+            openView,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                topMargin = px(4)
+            },
+        )
+
         root.addView(sheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
 
         scroll = scrollView
         messages = list
-        halo = haloView
-        bars = barViews
+        wheel = wheelView
         status = statusView
+        openInApp = openView
         return root
     }
 
@@ -175,6 +175,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         waitingId = null
         sessionId = null
         main.removeCallbacksAndMessages(null)
+        wheel?.stop()
         resetConversation()
     }
 
@@ -182,6 +183,9 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         messages?.removeAllViews()
         userBubble = null
         replyBubble = null
+        chips.clear()
+        saved = false
+        openInApp?.visibility = View.GONE
         state = State.IDLE
     }
 
@@ -206,8 +210,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
 
     override fun onRms(rmsDb: Float) {
         if (state != State.LISTENING) return
-        val level = rmsDb.coerceIn(0f, 10f) / 10f
-        bars.forEachIndexed { i, bar -> bar.scaleY = 0.6f + level * BAR_GAIN[i] }
+        wheel?.setLevel(WheelShape.levelFromRms(rmsDb))
     }
 
     override fun onPartial(text: String) {
@@ -251,6 +254,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
     private fun send(spoken: String) {
         val session = sessionId ?: return
         setState(State.THINKING, "Pensando...")
+        chips.clear()
         val bubble = addBubble(user = false).also { replyBubble = it }
         startDots(bubble)
 
@@ -270,6 +274,8 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
                 onProgress = { text -> main.post { onReplyText(id, text) } },
                 onHeartbeat = { main.post { if (waitingId == id) armTimeout(id, STALL_TIMEOUT_MS) } },
                 onDone = { st, reply -> main.post { onReplyDone(id, st, reply) } },
+                onTool = { callId, label, toolState -> main.post { onTool(id, callId, label, toolState) } },
+                onSaved = { main.post { if (waitingId == id) saved = true } },
             ),
         )
         if (!EdjiCommandTaskService.start(context, "command", id)) {
@@ -286,7 +292,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         if (state == State.THINKING) {
             AssistantLog.log("gesto → primeiro texto: ${SystemClock.elapsedRealtime() - shownAt} ms")
             stopDots()
-            setState(State.THINKING, "Respondendo...")
+            setState(State.REPLYING, "Respondendo...")
         }
         replyBubble?.text = text
         scrollToEnd()
@@ -303,6 +309,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
                 replyBubble?.text = reply
                 Haptics.replied(context)
                 setIdle("Toque para falar de novo")
+                if (saved) openInApp?.visibility = View.VISIBLE
             }
             "setup" -> showError(reply, setup = true)
             "cancelled" -> setIdle("Toque para falar de novo")
@@ -310,6 +317,46 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         }
         replyBubble = null
         scrollToEnd()
+    }
+
+    /** Adds or updates the chip of a tool call, just above the reply bubble. */
+    private fun onTool(id: Long, toolCallId: String, label: String, toolState: String) {
+        if (waitingId != id) return
+        val chip = chips[toolCallId] ?: addChip().also { chips[toolCallId] = it }
+        val mark = when (toolState) {
+            "running" -> "…"
+            "failed" -> "!"
+            else -> "✓"
+        }
+        chip.text = "$mark  $label"
+        chip.setTextColor(if (toolState == "failed") ERROR_TEXT else PINE)
+        chip.contentDescription = "$label, " + when (toolState) {
+            "running" -> "rodando"
+            "failed" -> "falhou"
+            else -> "concluída"
+        }
+        armTimeout(id, STALL_TIMEOUT_MS)
+        scrollToEnd()
+    }
+
+    private fun addChip(): TextView {
+        val chip = TextView(context).apply {
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(px(12), px(6), px(14), px(6))
+            background = GradientDrawable().apply {
+                setColor(MIST)
+                cornerRadius = 999 * density
+            }
+        }
+        val list = messages ?: return chip
+        val at = replyBubble?.let { list.indexOfChild(it) }?.takeIf { it >= 0 } ?: list.childCount
+        val params = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.START
+            topMargin = px(8)
+        }
+        list.addView(chip, at, params)
+        return chip
     }
 
     private var timeout = Runnable {}
@@ -336,8 +383,13 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         status?.textSize = if (next == State.IDLE) 15f else 18f
         status?.setTextColor(if (next == State.IDLE) MUTED else INK)
         status?.typeface = if (next == State.IDLE) Typeface.DEFAULT else Typeface.DEFAULT_BOLD
-        halo?.visibility = if (next == State.LISTENING) View.VISIBLE else View.INVISIBLE
-        if (next != State.LISTENING) bars.forEach { it.scaleY = 1f }
+        wheel?.state = when (next) {
+            State.LISTENING -> WheelState.LISTENING
+            State.THINKING -> WheelState.THINKING
+            State.REPLYING -> WheelState.REPLYING
+            State.IDLE -> WheelState.IDLE
+        }
+        if (next == State.LISTENING) openInApp?.visibility = View.GONE
     }
 
     private fun setIdle(label: String) = setState(State.IDLE, label)
@@ -387,14 +439,22 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         scrollToEnd()
     }
 
-    private fun openSettings() {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("edji://settings"))
+    private fun openSettings() = openLink("edji://settings")
+
+    /** Continues the session in the app's chat, where it was saved. */
+    private fun openConversation() {
+        val id = sessionId ?: return
+        openLink("edji://chat/voice/$id")
+    }
+
+    private fun openLink(link: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link))
             .setPackage(context.packageName)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             startAssistantActivity(intent)
         } catch (e: Exception) {
-            AssistantLog.log("não consegui abrir as configurações: ${e.javaClass.simpleName}")
+            AssistantLog.log("não consegui abrir $link: ${e.javaClass.simpleName}")
         }
         hide()
     }
@@ -480,16 +540,12 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         const val STALL_TIMEOUT_MS = 15_000L
 
         private val PINE = Color.parseColor("#073E2B")
-        private val MINT = Color.parseColor("#78FF9B")
         private val INK = Color.parseColor("#152019")
         private val PAPER = Color.parseColor("#F7F9F5")
         private val MIST = Color.parseColor("#E8EFE8")
         private val MUTED = Color.parseColor("#5E6A61")
-        private val HALO = Color.parseColor("#D8F9DF")
         private val ERROR_BG = Color.parseColor("#FBEDEA")
         private val ERROR_LINE = Color.parseColor("#E7C4BD")
-
-        private val BAR_HEIGHTS_DP = listOf(10, 16, 22, 16, 10)
-        private val BAR_GAIN = listOf(0.8f, 1.4f, 1.8f, 1.2f, 0.9f)
+        private val ERROR_TEXT = Color.parseColor("#9A2A1F")
     }
 }
