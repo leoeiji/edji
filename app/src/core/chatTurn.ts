@@ -19,6 +19,8 @@ export type TurnInput = {
   signal?: AbortSignal;
   /** The reply's parts so far, after every change: for the chat screen. */
   onParts?(parts: AssistantPart[]): void;
+  /** The stored id of the user message, before the reply starts: the screen hides stored rows from it on while it shows the live turn. */
+  onStored?(userMessageId: number): void;
   /** Same as [runAgent]'s, for the voice session. */
   onText?(textSoFar: string): void;
   onActivity?(): void;
@@ -39,7 +41,8 @@ export async function runPersistedTurn(input: TurnInput): Promise<TurnResult> {
   const { db, conversationId, userText } = input;
   const now = input.now ?? Date.now;
   const history = historyFor(await loadMessages(db, conversationId));
-  await addMessage(db, conversationId, { role: 'user', status: 'done', parts: [{ type: 'text', text: userText }], now: now() });
+  const userMessageId = await addMessage(db, conversationId, { role: 'user', status: 'done', parts: [{ type: 'text', text: userText }], now: now() });
+  input.onStored?.(userMessageId);
   const messageId = await addMessage(db, conversationId, { role: 'assistant', status: 'streaming', parts: [], now: now() });
 
   // Writes run one after another: a slow text save must not land after the tool that followed it.

@@ -14,13 +14,19 @@ export type ChatRow =
   | { kind: 'thinking'; key: string }
   | { kind: 'stopped'; key: string };
 
-/** A turn not stored yet as the screen sees it while it streams. */
-export type LiveTurn = { userText: string; parts: AssistantPart[] };
+/**
+ * The turn streaming now, as the screen shows it. The turn is stored as it
+ * goes, so stored messages from [fromMessageId] on are this same turn and
+ * are left out while it is live.
+ */
+export type LiveTurn = { userText: string; parts: AssistantPart[]; fromMessageId?: number };
 
 /** Rows oldest first; the screen's inverted list reverses them. */
 export function chatRows(messages: StoredMessage[], live: LiveTurn | null): ChatRow[] {
   const rows: ChatRow[] = [];
+  const cut = live?.fromMessageId;
   for (const m of messages) {
+    if (live && cut !== undefined && m.id >= cut) continue;
     if (m.role === 'user') {
       rows.push({ kind: 'user', key: `m${m.id}`, text: partsText(m.parts) });
     } else {

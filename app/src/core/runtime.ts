@@ -75,6 +75,8 @@ async function run(): Promise<number> {
   if (!EdjiAssistant) return 0;
   await ensureReady();
   let total = 0;
+  // Titles run after every queued command is answered: they must never delay a reply.
+  const afterReplies: Promise<void>[] = [];
   // Loop until empty: a command stored while this run was busy must not be dropped.
   for (;;) {
     const commands = await EdjiAssistant.pendingCommands();
@@ -83,11 +85,11 @@ async function run(): Promise<number> {
       const { result, afterReply } = await answer(c);
       await EdjiAssistant.completeCommand(c.id, result.status, result.reply);
       assistantLog(`agente: comando ${c.id} → ${result.status}${result.status === 'done' ? '' : `: ${result.reply}`}`);
-      // The title waits until the reply is on screen: it must never slow the answer down.
-      await afterReply?.().catch(() => {});
+      if (afterReply) afterReplies.push(afterReply().catch(() => {}));
       total++;
     }
   }
+  await Promise.all(afterReplies);
   return total;
 }
 

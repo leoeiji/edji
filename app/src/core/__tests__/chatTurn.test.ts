@@ -80,7 +80,7 @@ describe('runPersistedTurn', () => {
       tools: [addTool],
     });
     const second = scripted([step(text('t', ['Apaguei.']))]);
-    await runPersistedTurn({ db, conversationId: c.id, userText: 'apaga o que você registrou', settings, createModel: () => second });
+    await runPersistedTurn({ db, conversationId: c.id, userText: 'apaga o que você registrou', settings, createModel: () => second, tools: [addTool] });
     const prompt = JSON.stringify(second.doStreamCalls[0].prompt);
     expect(prompt).toContain('finance__add');
     expect(prompt).toContain('Anotado: R$ 38,00.');
@@ -152,5 +152,23 @@ describe('titleConversation', () => {
     await titleConversation(db, c, 'quanto gastei?', { status: 'done', reply: 'R$ 842,30.' }, { settings, createModel });
     expect(createModel).not.toHaveBeenCalled();
     expect(await getConversation(db, c.id)).toMatchObject({ title: 'Quanto gastei…', titleStatus: 'local' });
+  });
+});
+
+describe('runPersistedTurn ids', () => {
+  it('reports the stored user message before the reply starts', async () => {
+    const c = await createConversation(db, { title: 'Oi', origin: 'app' });
+    const order: string[] = [];
+    await runPersistedTurn({
+      db,
+      conversationId: c.id,
+      userText: 'oi',
+      settings,
+      createModel: () => scripted([step(text('t', ['Oi.']))]),
+      onStored: (id) => order.push(`stored:${id}`),
+      onParts: () => order.push('parts'),
+    });
+    const [userMessage] = await loadMessages(db, c.id);
+    expect(order[0]).toBe(`stored:${userMessage.id}`);
   });
 });

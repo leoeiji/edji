@@ -32,6 +32,18 @@ describe('chatRows', () => {
     expect(rows.at(-1)).toEqual({ kind: 'error', key: 'm2-error', text: 'Falta a chave.', setup: true });
   });
 
+  it('never shows the live turn twice while its stored copy reloads', () => {
+    const stored: StoredMessage[] = [
+      user(1, 'oi'),
+      { id: 2, role: 'assistant', status: 'done', createdAt: 0, parts: [{ type: 'text', text: 'Oi.' }] },
+      user(3, 'quanto gastei?'),
+      { id: 4, role: 'assistant', status: 'streaming', createdAt: 0, parts: [] },
+    ];
+    const rows = chatRows(stored, { userText: 'quanto gastei?', parts: [{ type: 'text', text: 'R$ 842' }], fromMessageId: 3 });
+    expect(rows.map((r) => r.kind)).toEqual(['user', 'text', 'user', 'text']);
+    expect(rows.filter((r) => r.kind === 'user' && r.text === 'quanto gastei?')).toHaveLength(1);
+  });
+
   it('shows thinking while waiting for the first text or after a tool, and marks stopped replies', () => {
     expect(chatRows([], { userText: 'oi', parts: [] }).map((r) => r.kind)).toEqual(['user', 'thinking']);
     const afterTool = chatRows([], { userText: 'oi', parts: [{ type: 'tool', id: 'c1', name: 'finance.summary', input: {}, state: 'done' }] });

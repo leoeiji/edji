@@ -149,7 +149,7 @@ export async function runAgent({
     const result = streamText({
       model: createModel(settings.apiKey, settings.model),
       instructions: instructions ?? INSTRUCTIONS,
-      messages: toModelMessages(messages),
+      messages: toModelMessages(messages, { withTools: Boolean(tools?.length) }),
       ...(tools?.length ? { tools: toToolSet(tools, outcomes), stopWhen: isStepCount(MAX_STEPS) } : {}),
       abortSignal: signal,
       maxRetries: 1,
@@ -209,16 +209,17 @@ const TOOL_FAILED = 'Algo falhou ao executar essa ação.';
  * tools becomes, per step, an assistant message (text and calls) followed by
  * a tool message with the results, as providers expect. A call without a
  * result (the turn was cut off) gets [INTERRUPTED_TOOL], so every call keeps
- * its pair.
+ * its pair. Without tools on offer (every plugin off), only the text goes:
+ * some providers reject tool blocks in a request that defines no tools.
  */
-export function toModelMessages(history: ChatMessage[]): ModelMessage[] {
+export function toModelMessages(history: ChatMessage[], { withTools = true }: { withTools?: boolean } = {}): ModelMessage[] {
   const out: ModelMessage[] = [];
   for (const m of history) {
     if (m.role === 'user') {
       out.push({ role: 'user', content: m.content });
       continue;
     }
-    if (!m.parts?.some((p) => p.type === 'tool')) {
+    if (!withTools || !m.parts?.some((p) => p.type === 'tool')) {
       if (m.content) out.push({ role: 'assistant', content: m.content });
       continue;
     }

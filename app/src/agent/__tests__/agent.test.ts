@@ -294,6 +294,27 @@ describe('toModelMessages', () => {
     expect(JSON.stringify(out)).toContain(INTERRUPTED_TOOL);
   });
 
+  it('sends only the text when no tools are on offer', () => {
+    const out = toModelMessages(
+      [
+        { role: 'user', content: 'registra 38' },
+        {
+          role: 'assistant',
+          content: 'Anotado.',
+          parts: [
+            { type: 'tool', id: 'c1', name: 'finance.add', input: {}, state: 'done', output: 'ok' },
+            { type: 'text', text: 'Anotado.' },
+          ],
+        },
+      ],
+      { withTools: false },
+    );
+    expect(out).toEqual([
+      { role: 'user', content: 'registra 38' },
+      { role: 'assistant', content: 'Anotado.' },
+    ]);
+  });
+
   it('keeps plain turns as text', () => {
     expect(toModelMessages([{ role: 'user', content: 'oi' }, { role: 'assistant', content: 'Oi.' }])).toEqual([
       { role: 'user', content: 'oi' },

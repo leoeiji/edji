@@ -22,6 +22,8 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
   const controller = useRef<AbortController | null>(null);
   const shown = useRef(conversationId);
   shown.current = conversationId;
+  const lastShownId = useRef(0);
+  lastShownId.current = messages.at(-1)?.id ?? 0;
 
   const reload = useCallback(async () => {
     const id = shown.current;
@@ -53,7 +55,9 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
 
       const abort = new AbortController();
       controller.current = abort;
-      setLive({ conversationId: conversation.id, userText, parts: [] });
+      // Stored rows of this turn reload while it streams; until its id is known, hide anything newer than what is shown.
+      let fromMessageId = conversation.id === conversationId ? lastShownId.current + 1 : 0;
+      setLive({ conversationId: conversation.id, userText, parts: [], fromMessageId });
       try {
         const settings = await loadModelSettings();
         const result = await runPersistedTurn({
@@ -65,7 +69,11 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
           instructions: CHAT_INSTRUCTIONS,
           tools: await agentTools(),
           signal: abort.signal,
-          onParts: (parts) => setLive({ conversationId: conversation.id, userText, parts }),
+          onStored: (id) => {
+            fromMessageId = id;
+            setLive((l) => (l ? { ...l, fromMessageId: id } : l));
+          },
+          onParts: (parts) => setLive({ conversationId: conversation.id, userText, parts, fromMessageId }),
         });
         controller.current = null;
         if (shown.current === conversation.id) setMessages(await loadMessages(db, conversation.id));
