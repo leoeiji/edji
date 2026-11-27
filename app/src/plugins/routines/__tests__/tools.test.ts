@@ -7,6 +7,7 @@ jest.mock('../../../../modules/edji-assistant', () => ({ EdjiAssistant: null }))
 
 const addExpense: Tool = {
   name: 'finance.add',
+  label: 'Registrar gasto',
   description: '',
   routineAction: true,
   parameters: {

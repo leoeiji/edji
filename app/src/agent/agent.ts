@@ -1,9 +1,34 @@
-import { APICallError, isStepCount, jsonSchema, streamText, tool, type LanguageModel, type ToolSet } from 'ai';
+import { APICallError, isStepCount, jsonSchema, streamText, tool, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import type { ParameterSchema, ToolResult } from '@/core/plugin';
 import type { ModelSettings } from './settings';
 
-/** One turn of the voice conversation. History lives only while the session is open. */
-export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+/** A tool call as the chat shows and stores it. `name` is the plugin's `<pluginId>.<action>`. */
+export type ToolPart = {
+  type: 'tool';
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  state: 'running' | 'done' | 'failed';
+  /** The short reply the model saw. Missing while running, or when the turn was cut off. */
+  output?: string;
+  durationMs?: number;
+};
+
+export type TextPart = { type: 'text'; text: string };
+
+export type AssistantPart = TextPart | ToolPart;
+
+/**
+ * One turn of a conversation. `content` is the visible text; an assistant
+ * turn with tools also carries `parts`, in stream order, so the calls go back
+ * to the model on later turns.
+ */
+export type ChatMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; parts?: AssistantPart[] };
+
+/** Live progress of a tool call, for the chat card and the voice chip. */
+export type ToolEvent = Omit<ToolPart, 'type'>;
 
 /**
  * How a turn ended. `setup` means the user has to fix something in the
@@ -35,17 +60,19 @@ export const MAX_STEPS = 10;
 export type AgentInput = {
   /** Earlier turns of this session, oldest first, then the new user message last. */
   messages: ChatMessage[];
-  settings: ModelSettings;
+  settings: Pick<ModelSettings, 'apiKey' | 'model'>;
   /** Called with the whole reply so far each time new text arrives. */
   onText?(textSoFar: string): void;
   /** Called when the model shows life without visible text (e.g. reasoning). */
   onActivity?(): void;
+  /** Called when a tool starts (`running`) and when it ends (`done` or `failed`). */
+  onToolEvent?(event: ToolEvent): void;
   signal?: AbortSignal;
   /** Builds the model; injected in tests. */
   createModel(apiKey: string, model: string): LanguageModel;
   /** Tools of the enabled plugins. None means a plain chat. */
   tools?: AgentTool[];
-  /** Replaces [INSTRUCTIONS], e.g. for routines that run with nobody present. */
+  /** Replaces [INSTRUCTIONS]: [CHAT_INSTRUCTIONS] in the app, [ROUTINE_INSTRUCTIONS] for routines. */
   instructions?: string;
 };
 
@@ -59,6 +86,19 @@ export const INSTRUCTIONS = [
   'Se não souber, diga que não sabe.',
   'Quando houver ferramentas, use-as para agir em vez de explicar como fazer; depois confirme em uma frase curta.',
 ].join(' ');
+
+/** Text chat in the app: same tone, but the reply is read, not heard, and may be a little longer. */
+export const CHAT_INSTRUCTIONS = [
+  'Você é o Edji, um assistente pessoal no celular.',
+  'A pessoa escreve no chat do app e lê a resposta numa tela pequena.',
+  'Responda em português do Brasil, direto e sem enrolação; use mais de três frases só quando o pedido pedir.',
+  'Não use markdown, títulos nem emojis; listas só com uma linha por item, sem marcadores.',
+  'Se não souber, diga que não sabe.',
+  'Quando houver ferramentas, use-as para agir em vez de explicar como fazer; depois confirme em uma frase curta.',
+].join(' ');
+
+/** What a cut-off tool call returns when the history goes back to the model. */
+export const INTERRUPTED_TOOL = 'Interrompida antes de terminar.';
 
 /** Instructions for an `ask_agent` routine: nobody reads the reply live, so act and report briefly. */
 export const ROUTINE_INSTRUCTIONS = [
@@ -90,6 +130,7 @@ export async function runAgent({
   settings,
   onText,
   onActivity,
+  onToolEvent,
   signal,
   createModel,
   tools,
@@ -101,12 +142,15 @@ export async function runAgent({
 
   let text = '';
   let streamError: unknown = null;
+  // Per call: when it started and whether the handler succeeded (the model only sees the reply).
+  const started = new Map<string, number>();
+  const outcomes = new Map<string, boolean>();
   try {
     const result = streamText({
       model: createModel(settings.apiKey, settings.model),
       instructions: instructions ?? INSTRUCTIONS,
-      messages,
-      ...(tools?.length ? { tools: toToolSet(tools), stopWhen: isStepCount(MAX_STEPS) } : {}),
+      messages: toModelMessages(messages),
+      ...(tools?.length ? { tools: toToolSet(tools, outcomes), stopWhen: isStepCount(MAX_STEPS) } : {}),
       abortSignal: signal,
       maxRetries: 1,
       onError: () => {}, // errors are read from fullStream below; the default logs to console.error
@@ -115,8 +159,24 @@ export async function runAgent({
       if (part.type === 'text-delta') {
         text += part.text;
         onText?.(text);
-      } else if (part.type === 'reasoning-delta' || part.type === 'tool-call' || part.type === 'tool-result') {
+      } else if (part.type === 'reasoning-delta') {
         onActivity?.();
+      } else if (part.type === 'tool-call') {
+        started.set(part.toolCallId, Date.now());
+        onActivity?.();
+        onToolEvent?.({ id: part.toolCallId, name: pluginToolName(part.toolName), input: asRecord(part.input), state: 'running' });
+      } else if (part.type === 'tool-result' || part.type === 'tool-error') {
+        onActivity?.();
+        const ok = part.type === 'tool-result' && outcomes.get(part.toolCallId) !== false;
+        const output = part.type === 'tool-result' && typeof part.output === 'string' ? part.output : TOOL_FAILED;
+        onToolEvent?.({
+          id: part.toolCallId,
+          name: pluginToolName(part.toolName),
+          input: asRecord(part.input),
+          state: ok ? 'done' : 'failed',
+          output,
+          durationMs: Date.now() - (started.get(part.toolCallId) ?? Date.now()),
+        });
       } else if (part.type === 'error') {
         streamError = part.error;
         break;
@@ -137,24 +197,85 @@ export function modelToolName(name: string): string {
   return name.replace('.', '__');
 }
 
-function toToolSet(tools: AgentTool[]): ToolSet {
+/** The plugin's name for a tool the model called: `routines__create` → `routines.create`. */
+export function pluginToolName(name: string): string {
+  return name.replace('__', '.');
+}
+
+const TOOL_FAILED = 'Algo falhou ao executar essa ação.';
+
+/**
+ * Builds the model's conversation from stored turns. An assistant turn with
+ * tools becomes, per step, an assistant message (text and calls) followed by
+ * a tool message with the results, as providers expect. A call without a
+ * result (the turn was cut off) gets [INTERRUPTED_TOOL], so every call keeps
+ * its pair.
+ */
+export function toModelMessages(history: ChatMessage[]): ModelMessage[] {
+  const out: ModelMessage[] = [];
+  for (const m of history) {
+    if (m.role === 'user') {
+      out.push({ role: 'user', content: m.content });
+      continue;
+    }
+    if (!m.parts?.some((p) => p.type === 'tool')) {
+      if (m.content) out.push({ role: 'assistant', content: m.content });
+      continue;
+    }
+    type Content = Exclude<Extract<ModelMessage, { role: 'assistant' }>['content'], string>;
+    type Results = Extract<ModelMessage, { role: 'tool' }>['content'];
+    let content: Content = [];
+    let results: Results = [];
+    const flush = () => {
+      if (content.length) out.push({ role: 'assistant', content });
+      if (results.length) out.push({ role: 'tool', content: results });
+      content = [];
+      results = [];
+    };
+    for (const p of m.parts) {
+      if (p.type === 'text') {
+        if (results.length) flush(); // text after a tool call belongs to the next step
+        if (p.text) content.push({ type: 'text', text: p.text });
+      } else {
+        const toolName = modelToolName(p.name);
+        content.push({ type: 'tool-call', toolCallId: p.id, toolName, input: p.input });
+        results.push({ type: 'tool-result', toolCallId: p.id, toolName, output: { type: 'text', value: p.output ?? INTERRUPTED_TOOL } });
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
+/**
+ * Tools for the model. Handlers never throw to it: a failure is a short reply
+ * it can relay. Whether the handler succeeded goes to [outcomes], by call id,
+ * so the chat can mark the card as failed.
+ */
+function toToolSet(tools: AgentTool[], outcomes: Map<string, boolean>): ToolSet {
   return Object.fromEntries(
     tools.map((t) => [
       modelToolName(t.name),
       tool({
         description: t.description,
         inputSchema: jsonSchema<Record<string, unknown>>(t.parameters as never),
-        // Tools never throw to the model: a failure is a short reply it can relay.
-        execute: async (params: Record<string, unknown>) => {
+        execute: async (params: Record<string, unknown>, { toolCallId }: { toolCallId: string }) => {
           try {
-            return (await t.execute(params)).reply;
+            const result = await t.execute(params);
+            outcomes.set(toolCallId, result.ok);
+            return result.reply;
           } catch {
-            return 'Algo falhou ao executar essa ação.';
+            outcomes.set(toolCallId, false);
+            return TOOL_FAILED;
           }
         },
       }),
     ]),
   );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 /** Maps a provider or network error to a short message. Never includes the key. */

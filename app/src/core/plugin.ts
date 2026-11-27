@@ -34,6 +34,8 @@ export type ParameterSchema = ObjectSchema;
 /** An action the agent can call. `name` is namespaced: `<pluginId>.<action>`. */
 export type Tool<P = Record<string, unknown>> = {
   name: string;
+  /** Short Portuguese name of the action ("Registrar gasto"), shown on the chat's tool card next to the plugin name. */
+  label: string;
   description: string;
   parameters: ParameterSchema;
   run(params: P, ctx: PluginContext): Promise<ToolResult>;

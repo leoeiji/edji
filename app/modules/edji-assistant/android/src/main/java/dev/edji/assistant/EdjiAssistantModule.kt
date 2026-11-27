@@ -46,6 +46,7 @@ class EdjiAssistantModule : Module() {
                     "id" to c.id.toDouble(),
                     "text" to c.text,
                     "createdAt" to c.createdAt.toDouble(),
+                    "sessionId" to c.sessionId,
                     "history" to history,
                 )
             }
@@ -57,6 +58,15 @@ class EdjiAssistantModule : Module() {
          */
         Function("pushReply") { id: Double, textSoFar: String ->
             CommandInbox.get(context).progress(id.toLong(), textSoFar)
+        }
+
+        /**
+         * Shows a tool call as a chip in the session: [label] is already in
+         * Portuguese ("Finanças · Registrar gasto"), [state] is `running`,
+         * `done` or `failed`. Returns false once nobody is waiting.
+         */
+        Function("pushTool") { id: Double, toolCallId: String, label: String, state: String ->
+            CommandInbox.get(context).tool(id.toLong(), toolCallId, label, state)
         }
 
         /** Whether the session still waits for the command. Doesn't extend its deadline. */

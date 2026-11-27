@@ -39,6 +39,7 @@ class CommandInbox private constructor(context: Context) :
         val onProgress: (String) -> Unit,
         val onHeartbeat: () -> Unit,
         val onDone: (status: String, reply: String) -> Unit,
+        val onTool: (toolCallId: String, label: String, state: String) -> Unit = { _, _, _ -> },
     )
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -126,6 +127,14 @@ class CommandInbox private constructor(context: Context) :
     fun progress(id: Long, textSoFar: String): Boolean {
         val waiter = waiters[id] ?: return false
         waiter.onProgress(textSoFar)
+        return true
+    }
+
+    /** Passes a tool call's progress to the waiting session; also a sign of life. False when nobody waits. */
+    fun tool(id: Long, toolCallId: String, label: String, state: String): Boolean {
+        val waiter = waiters[id] ?: return false
+        waiter.onTool(toolCallId, label, state)
+        waiter.onHeartbeat()
         return true
     }
 

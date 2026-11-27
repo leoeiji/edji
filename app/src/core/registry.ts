@@ -29,7 +29,7 @@ export async function applyEnabledStates(plugins: Plugin[], states: PluginStates
 
 /**
  * Checks the plugin list at startup: unique ids, tool names namespaced with
- * the plugin id and unique, routine actions with flat parameters and never
+ * the plugin id and unique, with a label, routine actions with flat parameters and never
  * from `routines`, migrations in increasing order. Throws on error.
  */
 export function validatePlugins(plugins: Plugin[]): void {
@@ -41,6 +41,7 @@ export function validatePlugins(plugins: Plugin[]): void {
     ids.add(p.id);
     for (const t of p.tools ?? []) {
       if (!t.name.startsWith(`${p.id}.`)) throw new Error(`Tool "${t.name}" must start with "${p.id}."`);
+      if (!t.label?.trim()) throw new Error(`Tool "${t.name}" needs a label`);
       if (tools.has(t.name)) throw new Error(`Duplicate tool "${t.name}"`);
       tools.add(t.name);
       if (t.routineAction) {
@@ -57,4 +58,16 @@ export function validatePlugins(plugins: Plugin[]): void {
       if (v !== i + 1) throw new Error(`Plugin "${p.id}" migrations must be numbered 1, 2, 3...`);
     });
   }
+}
+
+/**
+ * How a tool call reads on the chat card: "Finanças · Registrar gasto". A
+ * tool that no longer exists (plugin removed) shows its technical name.
+ */
+export function toolLabel(plugins: Plugin[], name: string): string {
+  for (const p of plugins) {
+    const t = p.tools?.find((x) => x.name === name);
+    if (t) return `${p.name} · ${t.label}`;
+  }
+  return name;
 }

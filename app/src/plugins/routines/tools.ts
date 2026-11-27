@@ -210,6 +210,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
   return [
     {
       name: 'routines.create',
+      label: 'Criar rotina',
       description:
         `Cria uma rotina que já nasce ativa: um gatilho, até ${MAX_STEPS} etapas e de 1 a ${MAX_ACTIONS} ações em ordem. ` +
         'Antes, descubra pacotes com routines.find_app e aparelhos, redes ou lugares com routines.find_target. ' +
@@ -224,6 +225,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.update',
+      label: 'Alterar rotina',
       description:
         'Troca uma rotina inteira (nome, gatilho, etapas, ações e exemplos) pelo id, mantendo se está ativa. ' +
         'Mande a rotina completa, não só o que mudou. Use para consertar uma rotina que falhou; depois reprocesse com routines.retry_failure.',
@@ -238,6 +240,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.test',
+      label: 'Testar rotina',
       description:
         'Testa uma rotina sem salvar nem executar nada, no mesmo motor das execuções reais: roda os exemplos dela, ' +
         'as amostras (saídas do gatilho) e as entradas guardadas de falhas. Mostra a saída de cada etapa e o que cada ação receberia.',
@@ -261,6 +264,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.sample_notifications',
+      label: 'Amostras de notificação',
       description:
         'Lê as notificações de um app que estão na tela agora, como o gatilho as veria, para usar como exemplo real ao escrever etapas. Não guarda nada.',
       parameters: obj({ packageName: s('Pacote do app, de routines.find_app') }, ['packageName']),
@@ -272,6 +276,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.list',
+      label: 'Listar rotinas',
       description: 'Lista as rotinas com id, nome, se está ativa, o que fazem e quantas falhas abertas têm.',
       parameters: obj({}, []),
       run: withBackend(async (b) => {
@@ -287,6 +292,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.list_failures',
+      label: 'Ver falhas',
       description:
         'Lista as execuções que falharam e ainda não foram resolvidas, com onde e por que falharam e a entrada guardada (ex.: o texto da notificação).',
       parameters: obj({ routineId: s('Opcional: só as falhas desta rotina') }, []),
@@ -303,6 +309,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.retry_failure',
+      label: 'Reprocessar falha',
       description: 'Roda de novo a entrada guardada de uma falha com a rotina como está agora. Use depois de consertar a rotina.',
       parameters: obj({ id: { type: 'integer', description: 'Id da falha' } }, ['id']),
       run: withBackend<{ id: number }>(async (b, { id }) => {
@@ -313,6 +320,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.discard_failure',
+      label: 'Descartar falha',
       description: 'Tira uma falha da lista sem reprocessar. Só quando o usuário pedir.',
       parameters: obj({ id: { type: 'integer', description: 'Id da falha' } }, ['id']),
       run: withBackend<{ id: number }>(async (b, { id }) => {
@@ -322,6 +330,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.set_enabled',
+      label: 'Ligar ou desligar rotina',
       description: 'Ativa ou desativa uma rotina pelo id.',
       parameters: obj({ id: s('Id da rotina'), enabled: { type: 'boolean' } }, ['id', 'enabled']),
       run: withBackend<{ id: string; enabled: boolean }>(async (b, { id, enabled }) => {
@@ -331,6 +340,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.delete',
+      label: 'Apagar rotina',
       description: 'Apaga uma rotina pelo id. Só quando o usuário pedir para apagar.',
       parameters: obj({ id: s('Id da rotina') }, ['id']),
       run: withBackend<{ id: string }>(async (b, { id }) => {
@@ -340,6 +350,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.find_app',
+      label: 'Buscar app',
       description: 'Procura apps instalados pelo nome e devolve o pacote de cada um.',
       parameters: obj({ query: s('Nome ou parte do nome, ex.: "spotify"') }, ['query']),
       run: withBackend<{ query: string }>(async (b, { query }) => {
@@ -350,6 +361,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.find_target',
+      label: 'Buscar destino',
       description: 'Lista o que pode disparar uma rotina: aparelhos Bluetooth pareados, a rede Wi-Fi atual ou os lugares salvos.',
       parameters: obj({ kind: s('', { enum: ['bluetooth', 'wifi', 'place'] }) }, ['kind']),
       run: withBackend<{ kind: string }>(async (b, { kind }) => {
@@ -371,6 +383,7 @@ export function routineTools(backend: () => RoutinesBackend | null = () => EdjiA
     },
     {
       name: 'routines.save_place',
+      label: 'Salvar lugar',
       description: 'Salva o lugar onde o celular está agora com um nome, ex.: "casa". Use quando o usuário disser "salva aqui como ...".',
       parameters: obj({ name: s('Nome do lugar') }, ['name']),
       run: withBackend<{ name: string }>(async (b, { name }) => {
