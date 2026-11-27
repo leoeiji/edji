@@ -1,6 +1,6 @@
 import type { PermissionId } from '@/core/permissions';
 import { actionPermissions, triggerPermissions } from './requirements';
-import type { Action, ActionKind, Trigger, TriggerKind } from './types';
+import type { Action, ActionKind, StepKind, Trigger, TriggerKind } from './types';
 
 /** One trigger or action the agent can use in a routine, described for the catalog screen. */
 export type CatalogEntry<K extends string> = {
@@ -17,6 +17,8 @@ export type CatalogEntry<K extends string> = {
 export type TriggerEntry = CatalogEntry<TriggerKind>;
 
 export type ActionEntry = CatalogEntry<ActionKind>;
+
+export type StepEntry = Omit<CatalogEntry<StepKind>, 'permissions'> & { permissions: [] };
 
 const SAMPLE_DEVICE = { address: '00:00:00:00:00:00', name: 'x' };
 
@@ -38,6 +40,7 @@ const ACTION_SAMPLES: Record<ActionKind, Action[]> = {
     { kind: 'ask_agent', prompt: 'x', reply: 'silent' },
     { kind: 'ask_agent', prompt: 'x', reply: 'notify' },
   ],
+  run_tool: [{ kind: 'run_tool', tool: 'x.y', input: {} }],
 };
 
 const unique = (ids: PermissionId[]) => [...new Set(ids)];
@@ -77,8 +80,32 @@ export const TRIGGER_CATALOG: TriggerEntry[] = [
     kind: 'notification',
     title: 'Notificação',
     summary: 'Quando um app específico posta uma notificação, com filtro opcional de texto.',
-    note: 'O texto da notificação fica no aparelho; só sai pela ação “Perguntar ao agente”.',
+    note: 'O texto fica no aparelho. Só sai pela ação “Perguntar ao agente” ou quando você pede ao Edji para ver ou consertar uma rotina.',
   }),
+];
+
+/** Steps in the order the catalog shows them. They need no permission. */
+export const STEP_CATALOG: StepEntry[] = [
+  {
+    kind: 'match',
+    title: 'Contém texto',
+    summary: 'Segue só se o texto tiver uma palavra ou frase, como “compra”.',
+    note: 'Se não tiver, a rotina para em silêncio.',
+    permissions: [],
+  },
+  {
+    kind: 'extract',
+    title: 'Extrair com regex',
+    summary: 'Tira partes do texto, como valor e loja, a partir dos exemplos que você dá ao Edji.',
+    note: 'Se o texto mudar e a regex não achar nada, a execução vai para as falhas, para corrigir e reprocessar.',
+    permissions: [],
+  },
+  {
+    kind: 'number',
+    title: 'Converter número',
+    summary: 'Transforma “R$ 1.234,56” em número para outras etapas e ações.',
+    permissions: [],
+  },
 ];
 
 /** Actions in the order the catalog shows them. */
@@ -91,6 +118,12 @@ export const ACTION_CATALOG: ActionEntry[] = [
     title: 'Modo de som',
     summary: 'Muda para normal, vibrar, silencioso ou Não perturbe.',
     note: 'Normal e vibrar não pedem permissão; silencioso e Não perturbe pedem acesso ao Não perturbe.',
+  }),
+  action({
+    kind: 'run_tool',
+    title: 'Executar tool de plugin',
+    summary: 'Chama um comando de um plugin, como registrar um gasto, com os dados das etapas.',
+    note: 'Roda no aparelho, sem rede e sem o modelo.',
   }),
   action({
     kind: 'ask_agent',

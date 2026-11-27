@@ -29,7 +29,8 @@ export async function applyEnabledStates(plugins: Plugin[], states: PluginStates
 
 /**
  * Checks the plugin list at startup: unique ids, tool names namespaced with
- * the plugin id and unique, migrations in increasing order. Throws on error.
+ * the plugin id and unique, routine actions with flat parameters and never
+ * from `routines`, migrations in increasing order. Throws on error.
  */
 export function validatePlugins(plugins: Plugin[]): void {
   const ids = new Set<string>();
@@ -42,6 +43,14 @@ export function validatePlugins(plugins: Plugin[]): void {
       if (!t.name.startsWith(`${p.id}.`)) throw new Error(`Tool "${t.name}" must start with "${p.id}."`);
       if (tools.has(t.name)) throw new Error(`Duplicate tool "${t.name}"`);
       tools.add(t.name);
+      if (t.routineAction) {
+        if (p.id === 'routines') throw new Error(`Tool "${t.name}": routines tools can't be routine actions`);
+        for (const [key, schema] of Object.entries(t.parameters.properties)) {
+          if (!('type' in schema) || !['string', 'number', 'integer', 'boolean'].includes(schema.type)) {
+            throw new Error(`Tool "${t.name}": routine action parameter "${key}" must be string, number, integer or boolean`);
+          }
+        }
+      }
     }
     const versions = (p.migrations ?? []).map((m) => m.version);
     versions.forEach((v, i) => {

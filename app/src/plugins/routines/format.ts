@@ -13,9 +13,15 @@ export function formatWhen(timestamp: number, now: number = Date.now()): string 
   return `${d.getDate()} ${MONTHS[d.getMonth()]}, ${time}`;
 }
 
-/** The line under a routine in the list: a missing permission wins over the last run. */
-export function routineFooter(routine: Pick<Routine, 'lastRunAt'>, missing: PermissionId[], now: number = Date.now()): string {
+/** The line under a routine in the list: a missing permission wins over open failures, which win over the last run. */
+export function routineFooter(
+  routine: Pick<Routine, 'lastRunAt'>,
+  missing: PermissionId[],
+  openFailures = 0,
+  now: number = Date.now(),
+): string {
   if (missing.length > 0) return `Falta ${lowerFirst(permissionById(missing[0]).label)}`;
+  if (openFailures > 0) return openFailures === 1 ? '1 falha para corrigir' : `${openFailures} falhas para corrigir`;
   if (routine.lastRunAt) return `Última vez ${lowerFirst(formatWhen(routine.lastRunAt, now))}`;
   return 'Nunca rodou';
 }

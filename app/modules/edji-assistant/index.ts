@@ -1,6 +1,16 @@
 import { requireOptionalNativeModule, type EventSubscription } from 'expo-modules-core';
 import type { PermissionId, PermissionStatus } from '../../src/core/permissions';
-import type { BluetoothDevice, Place, Routine, RoutineDraft, RoutineRun, RunOutcome } from '../../src/plugins/routines/types';
+import type {
+  BluetoothDevice,
+  Place,
+  RetryResult,
+  Routine,
+  RoutineDraft,
+  RoutineFailure,
+  RoutineRun,
+  RunOutcome,
+  TestCaseResult,
+} from '../../src/plugins/routines/types';
 
 /** A finished turn of the current voice session. */
 export type Turn = { role: 'user' | 'assistant'; content: string };
@@ -39,8 +49,23 @@ type EdjiAssistantNative = {
  */
 type RoutinesNative = {
   listRoutines(): Promise<Routine[]>;
-  /** Validates again, stores (enabled) and registers the trigger. Rejects with a short Portuguese reason. */
+  /** Validates again, runs the examples, stores (enabled) and registers the trigger. Rejects with a short Portuguese reason. */
   saveRoutine(draft: RoutineDraft): Promise<Routine>;
+  /** Same checks as [saveRoutine]; keeps id and `enabled`. Null when the id is unknown. */
+  updateRoutine(id: string, draft: RoutineDraft): Promise<Routine | null>;
+  /**
+   * Dry run on the native engine (the same RE2 regex as real firings): the
+   * draft's examples, then [samples] (trigger outputs), then the stored input
+   * of [failureIds]. Rejects with a short reason when the draft is invalid.
+   */
+  testRoutine(draft: RoutineDraft, samples: Record<string, string>[], failureIds: number[]): Promise<TestCaseResult[]>;
+  /** Notifications of an app showing now, newest first, as trigger outputs. Read live, never stored. */
+  activeNotifications(packageName: string): Promise<Record<string, string>[]>;
+  /** Open failures, newest first; only one routine's when given. */
+  listFailures(routineId: string | null): Promise<RoutineFailure[]>;
+  /** Runs a failure's input again with the routine as it is now. Null when the failure is gone. */
+  retryFailure(id: number): Promise<RetryResult | null>;
+  discardFailure(id: number): Promise<boolean>;
   deleteRoutine(id: string): Promise<boolean>;
   setRoutineEnabled(id: string, enabled: boolean): Promise<boolean>;
   recentRuns(limit: number): Promise<RoutineRun[]>;
@@ -51,11 +76,12 @@ type RoutinesNative = {
   listBluetoothDevices(): Promise<BluetoothDevice[]>;
   currentWifi(): Promise<{ ssid: string } | null>;
   listLaunchableApps(): Promise<{ packageName: string; label: string }[]>;
-  /** `ask_agent` firings waiting for the JS runtime. Text leaves the queue once completed or expired. */
+  /** Firings waiting for the JS runtime. Their text leaves the queue once completed or expired. */
   pendingRoutineRuns(): Promise<PendingRoutineRun[]>;
   /**
-   * Reports an `ask_agent` firing. `retry` keeps it queued (no network) until
-   * it expires; [notifyText] is shown as a notification when the routine asked for it.
+   * Reports a queued firing. `retry` keeps it queued (no network) until it
+   * expires; `failed` also lands in the failure queue; [notifyText] is shown
+   * as a notification when the routine asked for it.
    */
   completeRoutineRun(id: number, outcome: RunOutcome | 'retry', detail: string, notifyText: string | null): Promise<boolean>;
   /** Whether routines may send text to the agent with nobody present. Off by default. */
@@ -70,8 +96,13 @@ type RoutinesNative = {
   syncRoutines(): void;
 };
 
-/** An `ask_agent` firing: the prompt with the trigger variables already filled in. */
-export type PendingRoutineRun = { id: number; routineId: string; prompt: string; reply: 'silent' | 'notify'; firedAt: number };
+/** An `ask_agent` firing: the prompt with its references already filled in. */
+export type AgentRoutineRun = { id: number; routineId: string; kind: 'ask_agent'; prompt: string; reply: 'silent' | 'notify'; firedAt: number };
+
+/** A `run_tool` firing: the tool name and its arguments with references resolved. */
+export type RoutineToolRun = { id: number; routineId: string; kind: 'run_tool'; tool: string; args: Record<string, unknown>; firedAt: number };
+
+export type PendingRoutineRun = AgentRoutineRun | RoutineToolRun;
 
 /**
  * Native voice module (Android only). `null` where it isn't available

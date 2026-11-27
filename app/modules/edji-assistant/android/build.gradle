@@ -18,6 +18,9 @@ dependencies {
   // HeadlessJsTaskService and friends; the version comes from the app's React Native.
   implementation 'com.facebook.react:react-android'
 
+  // Linear-time regex for routine steps (ADR 0005): patterns written by a model run on text from other apps.
+  implementation 'com.google.re2j:re2j:1.8'
+
   // JVM tests of the routine logic. Android's org.json is a stub off the device, so tests use the real one.
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'org.json:json:20240303'

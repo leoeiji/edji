@@ -2,18 +2,18 @@ import { useState, type ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { missingPermissions, permissionById } from '@/core/permissions';
 import { useTheme } from '@/theme';
-import { ACTION_CATALOG, TRIGGER_CATALOG, type CatalogEntry } from './catalog';
-import { describeAction, describeRoutine, describeTrigger } from './describe';
+import { ACTION_CATALOG, STEP_CATALOG, TRIGGER_CATALOG, type CatalogEntry } from './catalog';
+import { describeAction, describeRoutine, describeStep, describeTrigger } from './describe';
 import { formatWhen, routineFooter, runLabel } from './format';
 import { requiredPermissions } from './requirements';
-import { MAX_ACTIONS, type Routine } from './types';
+import { MAX_ACTIONS, MAX_STEPS, type Routine } from './types';
 import { useRoutines, type RoutinesData } from './useRoutines';
 
-type Tab = 'routines' | 'actions' | 'triggers';
+type Tab = 'routines' | 'actions' | 'steps' | 'triggers';
 
 /**
- * Read-only list of routines and their details, plus a catalog of the
- * triggers and actions available. Only the agent creates or
+ * Read-only list of routines and their details (with open failures), plus a
+ * catalog of the triggers, steps and actions available. Only the agent creates or
  * changes routines for now (ADR 0005), so there are no edit controls here.
  */
 export function RoutinesView() {
@@ -39,6 +39,7 @@ export function RoutinesView() {
           <Tabs tab={tab} onChange={setTab} />
           {tab === 'routines' && <RoutineList data={data} onOpen={setSelected} />}
           {tab === 'triggers' && <Catalog kind="triggers" statuses={data.statuses} />}
+          {tab === 'steps' && <Catalog kind="steps" statuses={data.statuses} />}
           {tab === 'actions' && <Catalog kind="actions" statuses={data.statuses} />}
         </>
       )}
@@ -51,6 +52,7 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
   const items: { id: Tab; label: string }[] = [
     { id: 'routines', label: 'Rotinas' },
     { id: 'actions', label: 'Ações' },
+    { id: 'steps', label: 'Etapas' },
     { id: 'triggers', label: 'Gatilhos' },
   ];
   return (
@@ -73,20 +75,22 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange(tab: Tab): void }) {
   );
 }
 
+const CATALOG_INTRO = {
+  triggers: 'O que faz uma rotina disparar. Cada rotina tem um gatilho.',
+  steps: `O que a rotina faz com o que o gatilho entregou, antes das ações. Até ${MAX_STEPS} etapas, em ordem. O Edji escreve as etapas a partir dos exemplos que você dá.`,
+  actions: `O que a rotina faz quando dispara. Até ${MAX_ACTIONS} ações por rotina, em ordem.`,
+};
+
 /** What the agent can use to build a routine, with the permissions each one needs. */
-function Catalog({ kind, statuses }: { kind: 'triggers' | 'actions'; statuses: RoutinesData['statuses'] }) {
+function Catalog({ kind, statuses }: { kind: 'triggers' | 'steps' | 'actions'; statuses: RoutinesData['statuses'] }) {
   const t = useTheme();
-  const triggers = kind === 'triggers';
+  const entries: CatalogEntry<string>[] = kind === 'triggers' ? TRIGGER_CATALOG : kind === 'steps' ? STEP_CATALOG : ACTION_CATALOG;
   return (
     <View style={styles.list}>
-      <Text style={[styles.intro, { color: t.muted }]}>
-        {triggers
-          ? 'O que faz uma rotina disparar. Cada rotina tem um gatilho.'
-          : `O que a rotina faz quando dispara. Até ${MAX_ACTIONS} ações por rotina, em ordem.`}
-      </Text>
-      {triggers
-        ? TRIGGER_CATALOG.map((e) => <CatalogCard key={e.kind} entry={e} statuses={statuses} />)
-        : ACTION_CATALOG.map((e) => <CatalogCard key={e.kind} entry={e} statuses={statuses} />)}
+      <Text style={[styles.intro, { color: t.muted }]}>{CATALOG_INTRO[kind]}</Text>
+      {entries.map((e) => (
+        <CatalogCard key={e.kind} entry={e} statuses={statuses} />
+      ))}
     </View>
   );
 }
@@ -133,14 +137,16 @@ function RoutineList({ data, onOpen }: { data: RoutinesData; onOpen(id: string):
     <View style={styles.list}>
       {data.routines.map((r) => {
         const missing = missingPermissions(requiredPermissions(r), data.statuses);
+        const failures = data.failures.filter((f) => f.routineId === r.id).length;
+        const alert = missing.length > 0 || failures > 0;
         return (
           <Pressable key={r.id} onPress={() => onOpen(r.id)} style={[styles.card, { backgroundColor: t.surface }]}>
             <Text style={[styles.name, { color: t.text }]}>{r.name}</Text>
             <Text style={[styles.sentence, { color: t.muted }]}>{describeRoutine(r, { placeName: placeNameIn(data) })}</Text>
             <View style={styles.footer}>
               <EnabledPill enabled={r.enabled} />
-              <Text style={[styles.meta, { color: missing.length ? t.danger : t.muted }, missing.length > 0 && styles.bold]}>
-                {routineFooter(r, missing)}
+              <Text style={[styles.meta, { color: alert ? t.danger : t.muted }, alert && styles.bold]}>
+                {routineFooter(r, missing, failures)}
               </Text>
             </View>
           </Pressable>
@@ -162,6 +168,7 @@ function RoutineDetail({ routine: r, data, onBack }: { routine: Routine; data: R
   const required = requiredPermissions(r);
   const missing = missingPermissions(required, data.statuses);
   const runs = data.runs.filter((run) => run.routineId === r.id).slice(0, 10);
+  const failures = data.failures.filter((f) => f.routineId === r.id);
   return (
     <View>
       <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" style={styles.back}>
@@ -178,6 +185,16 @@ function RoutineDetail({ routine: r, data, onBack }: { routine: Routine; data: R
       <Section title="Quando">
         <Text style={[styles.row, { color: t.text }]}>{describeTrigger(r.trigger, { placeName: placeNameIn(data) })}</Text>
       </Section>
+
+      {r.steps.length > 0 && (
+        <Section title="Etapas">
+          {r.steps.map((s, i) => (
+            <Text key={s.id} style={[styles.row, { color: t.text }]}>
+              {i + 1}. {capitalize(describeStep(s))}
+            </Text>
+          ))}
+        </Section>
+      )}
 
       <Section title="Então">
         {r.actions.map((a, i) => (
@@ -198,6 +215,21 @@ function RoutineDetail({ routine: r, data, onBack }: { routine: Routine; data: R
               </Text>
             );
           })}
+        </Section>
+      )}
+
+      {failures.length > 0 && (
+        <Section title={`Falhas para corrigir (${failures.length})`}>
+          {failures.slice(0, 10).map((f) => (
+            <View key={f.id} style={styles.failure}>
+              <Text style={[styles.row, styles.tight, { color: t.text }]}>{formatWhen(f.failedAt)}</Text>
+              <Text style={[styles.meta, styles.left, { color: t.danger }]}>{f.reason}</Text>
+            </View>
+          ))}
+          <Text style={[styles.meta, styles.left, styles.failureHint, { color: t.muted }]}>
+            A entrada de cada falha fica guardada no aparelho. Peça ao Edji: “por que a rotina {r.name} falhou?”. Ele corrige a rotina e
+            reprocessa.
+          </Text>
         </Section>
       )}
 
@@ -273,4 +305,7 @@ const styles = StyleSheet.create({
   runRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   runOutcome: { fontSize: 14, fontWeight: '700', flexShrink: 1, textAlign: 'right' },
   note: { textAlign: 'left', marginTop: 20, lineHeight: 19 },
+  failure: { paddingVertical: 6, gap: 2 },
+  tight: { paddingVertical: 0 },
+  failureHint: { paddingVertical: 8, lineHeight: 19 },
 });

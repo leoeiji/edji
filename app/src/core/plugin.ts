@@ -6,6 +6,8 @@ export type PluginContext = {
   db: SQLiteDatabase;
   /** Tells open views that this plugin's data changed. */
   notifyChanged(): void;
+  /** Tools of the enabled plugins, e.g. for routines to check a `run_tool` action. */
+  enabledTools(): Promise<Tool<any>[]>;
 };
 
 /** Result of running a tool: a short reply for the voice session ("Anotado."). */
@@ -35,6 +37,13 @@ export type Tool<P = Record<string, unknown>> = {
   description: string;
   parameters: ParameterSchema;
   run(params: P, ctx: PluginContext): Promise<ToolResult>;
+  /**
+   * A routine may call it with no model and nobody present (`run_tool`, ADR
+   * 0005). Only local tools (no network) with flat parameters (string,
+   * number, integer, boolean); the handler must validate its input and
+   * avoid duplicates, since a failure can be retried.
+   */
+  routineAction?: boolean;
 };
 
 /** A screen shown as an item of the app's side panel. */

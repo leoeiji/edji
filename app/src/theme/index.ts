@@ -21,6 +21,22 @@ export type Theme = {
   danger: string;
   /** Dims the screen behind the side panel. */
   scrim: string;
+  /** Spending went up / down; also the first part of the "more often or pricier" bar. */
+  more: string;
+  less: string;
+  /** Second part of that bar: each purchase costing more. */
+  price: string;
+  /** Calendar steps from little to most spending, and text on the last one. */
+  heat1: string;
+  heat2: string;
+  heat3: string;
+  heat4: string;
+  onHeat: string;
+  /** Pine card that opens a screen, in both themes; mint for the highlight. */
+  heroBg: string;
+  heroText: string;
+  heroMuted: string;
+  heroHi: string;
 };
 
 const light: Theme = {
@@ -34,6 +50,18 @@ const light: Theme = {
   line: '#D5DED6',
   danger: '#9A2A1F',
   scrim: 'rgba(7, 20, 14, 0.45)',
+  more: '#B3472B',
+  less: '#0B6B45',
+  price: '#9A6A00',
+  heat1: '#F3DED6',
+  heat2: '#E6B3A3',
+  heat3: '#CF7A5E',
+  heat4: '#B3472B',
+  onHeat: '#FFFFFF',
+  heroBg: brand.pine,
+  heroText: brand.paper,
+  heroMuted: '#A9C7B6',
+  heroHi: brand.mint,
 };
 
 const dark: Theme = {
@@ -46,6 +74,18 @@ const dark: Theme = {
   line: '#24352B',
   danger: '#FF8A7A',
   scrim: 'rgba(7, 20, 14, 0.45)',
+  more: '#FF8F73',
+  less: brand.mint,
+  price: '#F2C94C',
+  heat1: '#33241F',
+  heat2: '#5E3326',
+  heat3: '#9E4B34',
+  heat4: '#FF8F73',
+  onHeat: brand.ink,
+  heroBg: brand.pine,
+  heroText: brand.paper,
+  heroMuted: '#A9C7B6',
+  heroHi: brand.mint,
 };
 
 export function useTheme(): Theme {

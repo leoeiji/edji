@@ -27,6 +27,9 @@ export function actionPermissions(action: Action): PermissionId[] {
       return action.mode === 'silent' || action.mode === 'dnd' ? ['dnd_access'] : [];
     case 'ask_agent':
       return action.reply === 'notify' ? ['notifications'] : [];
+    case 'run_tool':
+      // Runs in JS with no network; a failure notifies, but that is optional.
+      return [];
   }
 }
 

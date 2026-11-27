@@ -30,7 +30,7 @@ class RoutineLogicTest {
         val clean = RoutineJson.validate(draft(car, spotify).put("extra", 1), emptySet())
         assertEquals("Spotify no carro", clean.getString("name"))
         assertEquals("4C:11:22:33:44:9A", clean.getJSONObject("trigger").getJSONObject("device").getString("address"))
-        assertEquals(setOf("name", "trigger", "actions"), clean.keys().asSequence().toSet())
+        assertEquals(setOf("name", "trigger", "steps", "actions", "examples"), clean.keys().asSequence().toSet())
     }
 
     @Test
@@ -51,9 +51,12 @@ class RoutineLogicTest {
     }
 
     @Test
-    fun `fills prompt variables and keeps unknown ones`() {
-        val vars = mapOf("title" to "Compra aprovada", "text" to "R$ 45,90 em PADARIA")
-        assertEquals("Registre: Compra aprovada — R$ 45,90 em PADARIA {x}", RoutineJson.fill("Registre: {title} — {text} {x}", vars))
+    fun `fills prompt references and keeps unknown ones`() {
+        val values = mapOf("input.notification_title" to "Compra aprovada", "input.notification_message" to "R$ 45,90 em PADARIA")
+        assertEquals(
+            "Registre: Compra aprovada — R$ 45,90 em PADARIA {x} {input.missing}",
+            RoutinePipeline.fill("Registre: {input.notification_title} — {input.notification_message} {x} {input.missing}", values),
+        )
     }
 
     private val zone = ZoneId.of("America/Sao_Paulo")
