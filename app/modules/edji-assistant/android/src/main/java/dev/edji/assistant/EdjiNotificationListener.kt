@@ -2,6 +2,10 @@ package dev.edji.assistant
 
 import android.app.Notification
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -44,7 +48,14 @@ class EdjiNotificationListener : NotificationListenerService() {
             .sortedByDescending { it.postTime }
             .mapNotNull { sbn ->
                 val (title, text) = textOf(sbn) ?: return@mapNotNull null
-                mapOf("notification_title" to title, "notification_message" to text, "posted_at" to java.time.Instant.ofEpochMilli(sbn.postTime).toString())
+                val sample = mutableMapOf<String, Any>(
+                    "notification_title" to title,
+                    "notification_message" to text,
+                    "posted_at" to java.time.Instant.ofEpochMilli(sbn.postTime).toString(),
+                )
+                // Without a body, say what the app did send, so the cause can be seen (keys only, never values).
+                if (text.isEmpty()) sample["debug_extras"] = sbn.notification.extras.keySet().sorted().joinToString(",")
+                sample
             }
             .take(MAX_SAMPLES)
 
@@ -65,8 +76,31 @@ class EdjiNotificationListener : NotificationListenerService() {
             ticker = n.tickerText,
             title = title,
         )
-        if (title.isEmpty() && text.isEmpty()) return null
-        return title to text
+        val body = text.ifEmpty { remoteViewsText(n, title) }
+        if (title.isEmpty() && body.isEmpty()) return null
+        return title to body
+    }
+
+    /**
+     * Last resort for apps that draw their own layout and leave the extras
+     * empty: inflate the custom RemoteViews and read its text views. The
+     * title is dropped; blank and repeated texts too.
+     */
+    @Suppress("DEPRECATION")
+    private fun remoteViewsText(n: Notification, title: String): String {
+        val views = n.bigContentView ?: n.contentView ?: return ""
+        return try {
+            val root = views.apply(applicationContext, FrameLayout(applicationContext))
+            val texts = LinkedHashSet<String>()
+            fun walk(v: View) {
+                if (v is TextView) v.text?.toString()?.trim()?.takeIf { it.isNotEmpty() && it != title }?.let { texts.add(it) }
+                if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+            walk(root)
+            texts.joinToString("\n")
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     companion object {
