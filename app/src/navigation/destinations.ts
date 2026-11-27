@@ -1,9 +1,10 @@
 import type { Plugin } from '@/core/plugin';
 
-/** A side-panel destination: home, an enabled plugin view or a fixed screen. */
+/** A side-panel destination: the chat, an enabled plugin view or a fixed screen. */
 export type Destination = { key: string; title: string };
 
-export const HOME: Destination = { key: 'home', title: 'Início' };
+/** The chat is home; the panel reaches it through the conversations, not as an item. */
+export const HOME: Destination = { key: 'home', title: 'Conversa' };
 
 export const FIXED: Destination[] = [
   { key: 'settings', title: 'Configurações' },

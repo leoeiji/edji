@@ -37,6 +37,12 @@ export type Theme = {
   heroText: string;
   heroMuted: string;
   heroHi: string;
+  /** The user's chat bubble and its text. */
+  userBubble: string;
+  onUserBubble: string;
+  /** Tool cards in the chat, and the background of a failed one or an error reply. */
+  toolBg: string;
+  dangerBg: string;
 };
 
 const light: Theme = {
@@ -62,6 +68,10 @@ const light: Theme = {
   heroText: brand.paper,
   heroMuted: '#A9C7B6',
   heroHi: brand.mint,
+  userBubble: brand.pine,
+  onUserBubble: brand.paper,
+  toolBg: '#EFF3ED',
+  dangerBg: '#FBE6E2',
 };
 
 const dark: Theme = {
@@ -86,6 +96,10 @@ const dark: Theme = {
   heroText: brand.paper,
   heroMuted: '#A9C7B6',
   heroHi: brand.mint,
+  userBubble: '#1E4931',
+  onUserBubble: '#F0F8F0',
+  toolBg: '#132019',
+  dangerBg: '#3D1A17',
 };
 
 export function useTheme(): Theme {
