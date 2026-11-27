@@ -4,6 +4,7 @@ import { ModelSettings } from '@/components/settings/ModelSettings';
 import { RoutinesSettings } from '@/components/settings/RoutinesSettings';
 import { settingsStyles as styles } from '@/components/settings/styles';
 import { getDb, setPluginEnabled } from '@/core/db';
+import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import type { Plugin } from '@/core/plugin';
 import { isEnabled, type PluginStates } from '@/core/registry';
 import { useTheme } from '@/theme';
@@ -13,13 +14,14 @@ type Props = { plugins: Plugin[]; states: PluginStates; onStatesChanged(): void 
 /** Model provider (key, model, light model), conversations, the routines opt-in and plugin switches. Device permissions live in `PermissionsScreen`. */
 export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
   const t = useTheme();
+  const keyboard = useKeyboardInset();
   const toggle = async (p: Plugin, value: boolean) => {
     await setPluginEnabled(await getDb(), p.id, value);
     onStatesChanged();
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ marginBottom: keyboard }} contentContainerStyle={styles.root} keyboardShouldPersistTaps="handled">
       <ModelSettings />
       <ConversationSettings />
       <RoutinesSettings />

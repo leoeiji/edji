@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { FlatList, KeyboardAvoidingView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { Composer } from '@/components/chat/Composer';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ToolCard } from '@/components/chat/ToolCard';
 import { chatRows, type ChatRow } from '@/core/chatView';
 import { useChat } from '@/hooks/useChat';
+import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { useTheme } from '@/theme';
 
 type Props = {
@@ -17,6 +18,7 @@ type Props = {
 export function ChatScreen({ conversationId, onCreated, onOpenSettings }: Props) {
   const t = useTheme();
   const { messages, live, busy, send, stop } = useChat(conversationId, onCreated);
+  const keyboard = useKeyboardInset();
   // Inverted list: newest at the bottom, and it stays there as the reply grows.
   const rows = useMemo(() => chatRows(messages, live).reverse(), [messages, live]);
 
@@ -38,7 +40,7 @@ export function ChatScreen({ conversationId, onCreated, onOpenSettings }: Props)
   };
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior="padding">
+    <View style={[styles.root, { paddingBottom: keyboard }]}>
       {rows.length === 0 ? (
         <View style={styles.empty}>
           <Text style={[styles.emptyTitle, { color: t.text }]}>O que você precisa?</Text>
@@ -55,7 +57,7 @@ export function ChatScreen({ conversationId, onCreated, onOpenSettings }: Props)
         />
       )}
       <Composer busy={busy} onSend={send} onStop={stop} />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
