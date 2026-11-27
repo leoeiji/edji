@@ -1,6 +1,16 @@
 import { APICallError, simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { INSTRUCTIONS, MESSAGES, describeError, runAgent, type ChatMessage } from '../agent';
+import {
+  CHAT_INSTRUCTIONS,
+  INSTRUCTIONS,
+  INTERRUPTED_TOOL,
+  MESSAGES,
+  describeError,
+  runAgent,
+  toModelMessages,
+  type ChatMessage,
+  type ToolEvent,
+} from '../agent';
 
 type Part = Parameters<typeof simulateReadableStream>[0]['chunks'][number];
 
@@ -178,5 +188,145 @@ describe('describeError', () => {
   it('never puts the key in the message', () => {
     const error = new Error('bad key sk-or-test');
     expect(describeError(error).reply).not.toContain('sk-or');
+  });
+});
+
+/** A model that calls `finance__add` once, then answers. */
+function toolThenTextModel(reply: string) {
+  const steps = [
+    [
+      { type: 'stream-start', warnings: [] },
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'finance__add', input: '{"amount":38,"description":"Padaria"}' },
+      { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
+    ] as Part[],
+    [
+      { type: 'stream-start', warnings: [] },
+      { type: 'text-start', id: 't' },
+      { type: 'text-delta', id: 't', delta: reply },
+      { type: 'text-end', id: 't' },
+      { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage },
+    ] as Part[],
+  ];
+  let step = 0;
+  return new MockLanguageModelV4({ doStream: async () => ({ stream: simulateReadableStream({ chunks: steps[step++] }) as never }) });
+}
+
+const addTool = (execute: () => Promise<{ ok: boolean; reply: string }>) => ({
+  name: 'finance.add',
+  description: 'Registra um gasto.',
+  parameters: { type: 'object' as const, properties: { amount: { type: 'number' as const }, description: { type: 'string' as const } } },
+  execute,
+});
+
+describe('tool events', () => {
+  it('reports each call as running, then done, with the plugin name and the input', async () => {
+    const events: ToolEvent[] = [];
+    await runAgent({
+      messages: ask('registra 38 reais de padaria'),
+      settings,
+      createModel: () => toolThenTextModel('Anotado.'),
+      tools: [addTool(async () => ({ ok: true, reply: 'Anotado: R$ 38,00, Padaria.' }))],
+      onToolEvent: (e) => events.push(e),
+    });
+    expect(events.map((e) => [e.id, e.name, e.state])).toEqual([
+      ['c1', 'finance.add', 'running'],
+      ['c1', 'finance.add', 'done'],
+    ]);
+    expect(events[0].input).toEqual({ amount: 38, description: 'Padaria' });
+    expect(events[1].output).toBe('Anotado: R$ 38,00, Padaria.');
+    expect(events[1].durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('marks the call failed when the handler says so or throws, while the model still gets a reply', async () => {
+    for (const execute of [
+      async () => ({ ok: false, reply: 'Valor inválido.' }),
+      async (): Promise<{ ok: boolean; reply: string }> => {
+        throw new Error('boom');
+      },
+    ]) {
+      const events: ToolEvent[] = [];
+      const result = await runAgent({
+        messages: ask('registra padaria'),
+        settings,
+        createModel: () => toolThenTextModel('Não consegui registrar.'),
+        tools: [addTool(execute)],
+        onToolEvent: (e) => events.push(e),
+      });
+      expect(events.at(-1)?.state).toBe('failed');
+      expect(result.status).toBe('done');
+    }
+  });
+});
+
+describe('toModelMessages', () => {
+  it('replays a turn with tools as call and result pairs, step by step', () => {
+    const history: ChatMessage[] = [
+      { role: 'user', content: 'registra 38 de padaria' },
+      {
+        role: 'assistant',
+        content: 'Vou registrar. Anotado.',
+        parts: [
+          { type: 'text', text: 'Vou registrar.' },
+          { type: 'tool', id: 'c1', name: 'finance.add', input: { amount: 38 }, state: 'done', output: 'Anotado.' },
+          { type: 'text', text: 'Anotado.' },
+        ],
+      },
+    ];
+    expect(toModelMessages(history)).toEqual([
+      { role: 'user', content: 'registra 38 de padaria' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Vou registrar.' },
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'finance__add', input: { amount: 38 } },
+        ],
+      },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'finance__add', output: { type: 'text', value: 'Anotado.' } }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Anotado.' }] },
+    ]);
+  });
+
+  it('gives a cut-off call a result, so the pair stays complete', () => {
+    const out = toModelMessages([
+      { role: 'user', content: 'apaga o último gasto' },
+      { role: 'assistant', content: '', parts: [{ type: 'tool', id: 'c9', name: 'finance.delete', input: {}, state: 'running' }] },
+    ]);
+    expect(JSON.stringify(out)).toContain(INTERRUPTED_TOOL);
+  });
+
+  it('sends only the text when no tools are on offer', () => {
+    const out = toModelMessages(
+      [
+        { role: 'user', content: 'registra 38' },
+        {
+          role: 'assistant',
+          content: 'Anotado.',
+          parts: [
+            { type: 'tool', id: 'c1', name: 'finance.add', input: {}, state: 'done', output: 'ok' },
+            { type: 'text', text: 'Anotado.' },
+          ],
+        },
+      ],
+      { withTools: false },
+    );
+    expect(out).toEqual([
+      { role: 'user', content: 'registra 38' },
+      { role: 'assistant', content: 'Anotado.' },
+    ]);
+  });
+
+  it('keeps plain turns as text', () => {
+    expect(toModelMessages([{ role: 'user', content: 'oi' }, { role: 'assistant', content: 'Oi.' }])).toEqual([
+      { role: 'user', content: 'oi' },
+      { role: 'assistant', content: 'Oi.' },
+    ]);
+  });
+});
+
+describe('CHAT_INSTRUCTIONS', () => {
+  it('drops the voice-only rules but keeps the tone', () => {
+    expect(CHAT_INSTRUCTIONS).not.toContain('reconhecimento de voz');
+    expect(INSTRUCTIONS).toContain('reconhecimento de voz');
+    expect(CHAT_INSTRUCTIONS).toContain('português do Brasil');
   });
 });

@@ -19,6 +19,8 @@ const mockNative = {
   pendingCommands: jest.fn<Promise<PendingCommand[]>, []>(),
   completeCommand: jest.fn(async () => true),
   pushReply: jest.fn(() => true),
+  pushTool: jest.fn(() => true),
+  markSaved: jest.fn(() => true),
   isWaiting: jest.fn(() => true),
   heartbeat: jest.fn(() => true),
   log: jest.fn(),
@@ -32,7 +34,7 @@ jest.mock('../../../modules/edji-assistant', () => ({
   assistantLog: jest.fn(),
 }));
 
-const command = (id: number, text: string): PendingCommand => ({ id, text, createdAt: 0, history: [] });
+const command = (id: number, text: string): PendingCommand => ({ id, text, createdAt: 0, sessionId: null, history: [] });
 const mockedRunAgent = runAgent as jest.MockedFunction<typeof runAgent>;
 
 beforeEach(() => {

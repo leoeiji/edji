@@ -1,5 +1,5 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
-import type { Plugin } from './plugin';
+import type { Migration, Plugin } from './plugin';
 import type { PluginStates } from './registry';
 
 let opening: Promise<SQLiteDatabase> | null = null;
@@ -10,6 +10,7 @@ export function getDb(): Promise<SQLiteDatabase> {
     const db = await openDatabaseAsync('edji.db');
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS plugin_state (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS plugin_schema (id TEXT PRIMARY KEY, version INTEGER NOT NULL);
     `);
@@ -20,20 +21,27 @@ export function getDb(): Promise<SQLiteDatabase> {
 
 /** Applies each plugin's pending migrations in a transaction. Enabled or not: data is kept either way. */
 export async function migratePlugins(db: SQLiteDatabase, plugins: Plugin[]): Promise<void> {
-  for (const p of plugins) {
-    const row = await db.getFirstAsync<{ version: number }>('SELECT version FROM plugin_schema WHERE id = ?', p.id);
-    const current = row?.version ?? 0;
-    const pending = (p.migrations ?? []).filter((m) => m.version > current);
-    if (pending.length === 0) continue;
-    await db.withExclusiveTransactionAsync(async (tx) => {
-      for (const m of pending) await tx.execAsync(m.sql);
-      await tx.runAsync(
-        'INSERT INTO plugin_schema (id, version) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version',
-        p.id,
-        pending[pending.length - 1].version,
-      );
-    });
-  }
+  for (const p of plugins) await applyMigrations(db, p.id, p.migrations ?? []);
+}
+
+/**
+ * Applies the migrations of [id] newer than its stored version, in one
+ * transaction, and stores the new version in `plugin_schema`. Core modules
+ * (like the chat) use ids starting with `_`, which no plugin id can.
+ */
+export async function applyMigrations(db: SQLiteDatabase, id: string, migrations: Migration[]): Promise<void> {
+  const row = await db.getFirstAsync<{ version: number }>('SELECT version FROM plugin_schema WHERE id = ?', id);
+  const current = row?.version ?? 0;
+  const pending = migrations.filter((m) => m.version > current);
+  if (pending.length === 0) return;
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    for (const m of pending) await tx.execAsync(m.sql);
+    await tx.runAsync(
+      'INSERT INTO plugin_schema (id, version) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET version = excluded.version',
+      id,
+      pending[pending.length - 1].version,
+    );
+  });
 }
 
 export async function loadPluginStates(db: SQLiteDatabase): Promise<PluginStates> {

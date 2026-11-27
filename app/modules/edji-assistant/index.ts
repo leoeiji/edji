@@ -17,9 +17,13 @@ export type Turn = { role: 'user' | 'assistant'; content: string };
 
 /**
  * A voice command stored by the native session, waiting for the agent.
- * `history` holds the earlier turns of the same session, oldest first.
+ * `history` holds the earlier turns of the same session, oldest first;
+ * `sessionId` ties the session to its saved conversation (ADR 0006).
  */
-export type PendingCommand = { id: number; text: string; createdAt: number; history: Turn[] };
+export type PendingCommand = { id: number; text: string; createdAt: number; sessionId: string | null; history: Turn[] };
+
+/** Progress of a tool call, as the session's chip shows it. */
+export type ToolChipState = 'running' | 'done' | 'failed';
 
 /** How the agent finished a command, as the session shows it. */
 export type CommandStatus = 'done' | 'setup' | 'failed' | 'cancelled';
@@ -28,6 +32,10 @@ type EdjiAssistantNative = {
   pendingCommands(): Promise<PendingCommand[]>;
   /** Shows the reply so far in the session. Returns false once nobody is waiting (session closed). */
   pushReply(id: number, textSoFar: string): boolean;
+  /** Shows a tool call as a chip in the session, with a ready-made Portuguese label. False once nobody is waiting. */
+  pushTool(id: number, toolCallId: string, label: string, state: ToolChipState): boolean;
+  /** Tells the session its turn was saved as a conversation, so it offers "Abrir no Edji". */
+  markSaved(id: number): boolean;
   /** Whether the session still waits for this command. Doesn't extend its deadline. */
   isWaiting(id: number): boolean;
   /** Tells the session the model is still working (e.g. reasoning). Returns false once nobody is waiting. */

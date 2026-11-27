@@ -98,6 +98,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
   return [
     {
       name: 'finance.add',
+      label: 'Registrar gasto',
       description:
         'Registra um gasto ou uma entrada de dinheiro. Rotinas podem chamar com dados de notificações do banco; ' +
         'nesse caso passe input.notification_id em dedupKey e input.posted_at em occurredAt.',
@@ -127,6 +128,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.summary',
+      label: 'Resumo do mês',
       description: 'Soma os gastos e as entradas de um mês, com os gastos por categoria.',
       parameters: {
         type: 'object',
@@ -149,6 +151,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.recent',
+      label: 'Registros recentes',
       description: 'Lista os últimos gastos e entradas com id.',
       parameters: {
         type: 'object',
@@ -168,6 +171,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.uncategorized',
+      label: 'Registros sem categoria',
       description:
         'Lista as descrições (lojas, pessoas) com gastos ou entradas sem categoria, e as categorias que já existem. ' +
         'Use antes de finance.categorize quando o usuário pedir para categorizar.',
@@ -197,6 +201,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.categorize',
+      label: 'Categorizar',
       description:
         'Põe gastos e entradas em categorias, em lote. Por descrição, vale para todos os registros com ela e para os próximos; ' +
         'por id, só para aquele. Reaproveite as categorias existentes (finance.uncategorized lista) e crie novas só quando nenhuma servir. ' +
@@ -260,6 +265,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.rename_category',
+      label: 'Renomear categoria',
       description:
         'Renomeia uma categoria. Se já existir uma com o novo nome, junta as duas: os registros passam para ela. ' +
         'Só quando o usuário pedir.',
@@ -280,6 +286,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.delete_category',
+      label: 'Apagar categoria',
       description: 'Apaga uma categoria; os registros ficam, sem categoria. Só quando o usuário pedir.',
       parameters: { type: 'object', properties: { name: { type: 'string', description: 'Nome da categoria' } }, required: ['name'] },
       run: async ({ name }: { name: string }, ctx): Promise<ToolResult> => {
@@ -292,6 +299,7 @@ export function financeTools(now: () => number = Date.now): Tool<any>[] {
     },
     {
       name: 'finance.delete',
+      label: 'Apagar registro',
       description: 'Apaga um registro pelo id. Só quando o usuário pedir.',
       parameters: { type: 'object', properties: { id: { type: 'integer', description: 'Id, de finance.recent' } }, required: ['id'] },
       run: async ({ id }: { id: number }, ctx): Promise<ToolResult> => {

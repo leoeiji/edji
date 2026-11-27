@@ -9,6 +9,6 @@ describe('destinationsFor', () => {
   });
 
   it('has only the fixed screens when no plugin has a view', () => {
-    expect(destinationsFor([]).map((d) => d.title)).toEqual(['Início', 'Configurações', 'Permissões', 'Registro']);
+    expect(destinationsFor([]).map((d) => d.title)).toEqual(['Conversa', 'Configurações', 'Permissões', 'Registro']);
   });
 });

@@ -1,20 +1,25 @@
 import { EdjiAssistant, assistantLog, type AgentRoutineRun, type PendingCommand, type RoutineToolRun } from '../../modules/edji-assistant';
 import { PLUGINS } from '@/plugins';
 import { MESSAGES, ROUTINE_INSTRUCTIONS, runAgent, type AgentResult, type AgentTool, type ChatMessage } from '@/agent/agent';
-import { getDb, loadPluginStates, migratePlugins } from './db';
+import { applyMigrations, getDb, loadPluginStates, migratePlugins } from './db';
+import { fallbackTitle } from '@/agent/light';
+import { CHAT_MIGRATIONS, CHAT_SCHEMA_ID, createConversation, findVoiceConversation, savesVoiceConversations } from './chatStore';
+import { runPersistedTurn, titleConversation } from './chatTurn';
 import { emitChanged } from './events';
 import { openRouterModel } from '@/agent/openrouter';
 import type { PluginContext, Tool } from './plugin';
-import { availableTools, enabledPlugins, validatePlugins } from './registry';
+import { availableTools, enabledPlugins, toolLabel, validatePlugins } from './registry';
 import { loadModelSettings, type ModelSettings } from '@/agent/settings';
 
 let ready: Promise<void> | null = null;
 
-/** Validates plugins and runs migrations once per JS runtime (app or headless). */
+/** Validates plugins and runs the chat and plugin migrations once per JS runtime (app or headless). */
 export function ensureReady(): Promise<void> {
   ready ??= (async () => {
     validatePlugins(PLUGINS);
-    await migratePlugins(await getDb(), PLUGINS);
+    const db = await getDb();
+    await applyMigrations(db, CHAT_SCHEMA_ID, CHAT_MIGRATIONS);
+    await migratePlugins(db, PLUGINS);
   })();
   return ready;
 }
@@ -70,21 +75,33 @@ async function run(): Promise<number> {
   if (!EdjiAssistant) return 0;
   await ensureReady();
   let total = 0;
+  // Titles run after every queued command is answered: they must never delay a reply.
+  const afterReplies: Promise<void>[] = [];
   // Loop until empty: a command stored while this run was busy must not be dropped.
   for (;;) {
     const commands = await EdjiAssistant.pendingCommands();
     if (commands.length === 0) break;
     for (const c of commands) {
-      const result = await answer(c);
+      const { result, afterReply } = await answer(c);
       await EdjiAssistant.completeCommand(c.id, result.status, result.reply);
       assistantLog(`agente: comando ${c.id} → ${result.status}${result.status === 'done' ? '' : `: ${result.reply}`}`);
+      if (afterReply) afterReplies.push(afterReply().catch(() => {}));
       total++;
     }
   }
+  await Promise.all(afterReplies);
   return total;
 }
 
-async function answer(c: PendingCommand): Promise<AgentResult> {
+type Answer = { result: AgentResult; afterReply?: () => Promise<void> };
+
+/**
+ * Answers one voice command. With saving on (the default), the session is a
+ * conversation like any other: the history comes from `edji.db`, tools
+ * included, and the turn is stored. With it off, nothing is stored and the
+ * history is the session's own, as before.
+ */
+async function answer(c: PendingCommand): Promise<Answer> {
   const assistant = EdjiAssistant!;
   const controller = new AbortController();
   // The session may give up (timeout, closed) while the model sends nothing; stop then too.
@@ -94,13 +111,16 @@ async function answer(c: PendingCommand): Promise<AgentResult> {
   const startedAt = Date.now();
   let first = true;
   try {
-    return await runAgent({
-      messages: messagesFor(c),
-      settings: await loadModelSettings(),
+    const db = await getDb();
+    const settings = await loadModelSettings();
+    const live = {
       signal: controller.signal,
       createModel: openRouterModel,
       tools: await agentTools(),
-      onText: (text) => {
+      onToolEvent: (e: { id: string; name: string; state: 'running' | 'done' | 'failed' }) => {
+        if (!assistant.pushTool(c.id, e.id, toolLabel(PLUGINS, e.name), e.state)) controller.abort();
+      },
+      onText: (text: string) => {
         if (first) {
           first = false;
           assistantLog(`agente: primeiro texto em ${Date.now() - startedAt} ms`);
@@ -110,7 +130,19 @@ async function answer(c: PendingCommand): Promise<AgentResult> {
       onActivity: () => {
         if (!assistant.heartbeat(c.id)) controller.abort();
       },
-    });
+    };
+    if (c.sessionId && (await savesVoiceConversations(db))) {
+      const conversation =
+        (await findVoiceConversation(db, c.sessionId)) ??
+        (await createConversation(db, { title: fallbackTitle(c.text), origin: 'voice', voiceSessionId: c.sessionId }));
+      const result = await runPersistedTurn({ db, conversationId: conversation.id, userText: c.text, settings, ...live });
+      assistant.markSaved(c.id);
+      return {
+        result,
+        afterReply: () => titleConversation(db, conversation, c.text, result, { settings, createModel: openRouterModel }),
+      };
+    }
+    return { result: await runAgent({ messages: messagesFor(c), settings, ...live }) };
   } finally {
     clearInterval(poll);
   }

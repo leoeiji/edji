@@ -1,8 +1,9 @@
 import type { Plugin, Tool } from '../plugin';
-import { applyEnabledStates, availableTools, enabledPlugins, isEnabled, validatePlugins } from '../registry';
+import { applyEnabledStates, availableTools, enabledPlugins, isEnabled, toolLabel, validatePlugins } from '../registry';
 
 const tool = (name: string): Tool => ({
   name,
+  label: 'Adicionar',
   description: name,
   parameters: { type: 'object', properties: {} },
   run: async () => ({ ok: true, reply: 'ok' }),
@@ -63,5 +64,17 @@ describe('applyEnabledStates', () => {
     const broken = { ...agenda, onEnabledChange: () => Promise.reject(new Error('no native')) };
     await applyEnabledStates([{ ...todo, onEnabledChange }, broken], { todo: false });
     expect(onEnabledChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('tool labels', () => {
+  it('rejects a tool without a label', () => {
+    const bad: Plugin = { ...todo, tools: [{ ...tool('todo.add'), label: ' ' }] };
+    expect(() => validatePlugins([bad])).toThrow('needs a label');
+  });
+
+  it('reads as plugin name and action, or the technical name when the tool is gone', () => {
+    expect(toolLabel([todo, agenda], 'agenda.add')).toBe('Agenda · Adicionar');
+    expect(toolLabel([todo], 'agenda.add')).toBe('agenda.add');
   });
 });

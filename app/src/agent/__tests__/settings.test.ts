@@ -1,5 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
-import { loadModelSettings, saveApiKey, saveModel } from '../settings';
+import { loadModelSettings, saveApiKey, saveLightModel, saveModel } from '../settings';
 
 jest.mock('expo-secure-store', () => {
   const store = new Map<string, string>();
@@ -14,7 +14,7 @@ describe('model settings', () => {
   it('saves trimmed values and reads them back', async () => {
     await saveApiKey('  sk-or-abc  ');
     await saveModel(' autor/modelo ');
-    expect(await loadModelSettings()).toEqual({ apiKey: 'sk-or-abc', model: 'autor/modelo' });
+    expect(await loadModelSettings()).toEqual({ apiKey: 'sk-or-abc', model: 'autor/modelo', lightModel: null });
   });
 
   it('an empty key deletes it, turning the network off again', async () => {
@@ -25,7 +25,15 @@ describe('model settings', () => {
   });
 
   it('treats a blank stored value as missing', async () => {
-    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce('').mockResolvedValueOnce(' ');
-    expect(await loadModelSettings()).toEqual({ apiKey: null, model: null });
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce('').mockResolvedValueOnce(' ').mockResolvedValueOnce('  ');
+    expect(await loadModelSettings()).toEqual({ apiKey: null, model: null, lightModel: null });
+  });
+
+  it('keeps the light model apart and clears it when emptied', async () => {
+    await saveLightModel(' autor/modelo-leve ');
+    expect((await loadModelSettings()).lightModel).toBe('autor/modelo-leve');
+    await saveLightModel('');
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('openrouter_light_model');
+    expect((await loadModelSettings()).lightModel).toBeNull();
   });
 });

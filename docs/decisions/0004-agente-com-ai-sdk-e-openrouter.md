@@ -1,6 +1,6 @@
 # 0004: Agente conversacional com AI SDK e OpenRouter
 
-- **Status:** aceita; comportamento em aparelho ainda não verificado
+- **Status:** aceita; comportamento em aparelho ainda não verificado. Emendada pela [0006](0006-chat-com-historico.md): o início vira o chat, as conversas são guardadas (inclusive as de voz, com interruptor) e a bolinha vira a roda.
 - **Data:** 2026-11-24
 - **Relacionadas:** [0001](0001-ativacao-pelo-botao-lateral-android.md), [0002](0002-stack-react-native-expo.md), [0003](0003-arquitetura-de-plugins.md)
 
