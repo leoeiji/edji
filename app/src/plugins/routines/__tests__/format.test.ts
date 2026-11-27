@@ -11,10 +11,12 @@ describe('formatWhen', () => {
 });
 
 describe('routineFooter', () => {
-  it('shows a missing permission before the last run', () => {
-    expect(routineFooter({ lastRunAt: now }, ['background_location'], now)).toBe('Falta localização o tempo todo');
-    expect(routineFooter({ lastRunAt: new Date(2026, 10, 25, 8, 12).getTime() }, [], now)).toBe('Última vez hoje, 08:12');
-    expect(routineFooter({ lastRunAt: null }, [], now)).toBe('Nunca rodou');
+  it('shows a missing permission, then open failures, then the last run', () => {
+    expect(routineFooter({ lastRunAt: now }, ['background_location'], 2, now)).toBe('Falta localização o tempo todo');
+    expect(routineFooter({ lastRunAt: now }, [], 1, now)).toBe('1 falha para corrigir');
+    expect(routineFooter({ lastRunAt: now }, [], 3, now)).toBe('3 falhas para corrigir');
+    expect(routineFooter({ lastRunAt: new Date(2026, 10, 25, 8, 12).getTime() }, [], 0, now)).toBe('Última vez hoje, 08:12');
+    expect(routineFooter({ lastRunAt: null }, [], 0, now)).toBe('Nunca rodou');
   });
 });
 

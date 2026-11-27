@@ -25,8 +25,12 @@ export type AgentTool = {
   execute(params: Record<string, unknown>): Promise<ToolResult>;
 };
 
-/** Max model steps per turn: tool calls plus the final answer. */
-export const MAX_STEPS = 6;
+/**
+ * Max model steps per turn: tool calls plus the final answer. Creating a
+ * routine from a notification takes find_app, sample_notifications, a test or
+ * two, create and the answer, with room for one more regex fix.
+ */
+export const MAX_STEPS = 10;
 
 export type AgentInput = {
   /** Earlier turns of this session, oldest first, then the new user message last. */

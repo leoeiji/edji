@@ -15,11 +15,15 @@ import android.net.wifi.WifiManager
 import java.time.ZonedDateTime
 import java.util.concurrent.Executors
 
+/** How one firing ended: `done`, `failed`, `blocked` or `skipped` (a step stopped it on purpose). */
+data class RunResult(val outcome: String, val detail: String)
+
 /**
  * The routines engine (ADR 0005). [sync] registers with Android what the
  * enabled routines listen to (alarms, proximity alerts, network callbacks);
  * the receivers and the notification listener call the `on*` methods, which
- * match routines and run their actions on a background thread.
+ * match routines, run their steps ([RoutinePipeline]) and then their actions
+ * on a background thread. Failed firings go to the failure queue.
  *
  * Bluetooth (ACL broadcasts) and notifications (listener service) are
  * declared in the manifest and filtered here, so they need no registration.
@@ -155,7 +159,7 @@ object RoutineEngine {
     fun onBluetooth(context: Context, address: String, name: String, connected: Boolean) {
         val event = if (connected) "connected" else "disconnected"
         AssistantLog.log("rotinas: Bluetooth $event: $name")
-        fire(context, mapOf("device" to name), null) { t ->
+        fire(context, mapOf("device_name" to name, "device_address" to address), null) { t ->
             t.optString("kind") == "bluetooth" && t.optString("event") == event &&
                 t.optJSONObject("device")?.optString("address").equals(address, ignoreCase = true)
         }
@@ -177,7 +181,7 @@ object RoutineEngine {
         val event = if (entering) "enter" else "exit"
         val name = RoutineStore.get(context).listPlaces().firstOrNull { it.id == placeId }?.name ?: placeId
         AssistantLog.log("rotinas: lugar $event: $name")
-        fire(context, mapOf("place" to name), null) { t ->
+        fire(context, mapOf("place_name" to name), null) { t ->
             t.optString("kind") == "place" && t.optString("event") == event && t.optString("placeId") == placeId
         }
     }
@@ -199,17 +203,22 @@ object RoutineEngine {
         } catch (e: Exception) {
             packageName
         }
-        val haystack = "$title\n$text"
-        val vars = mapOf("app" to label, "title" to title, "text" to text, "postedAt" to java.time.Instant.ofEpochMilli(postedAt).toString())
-        fire(context, vars, dedupe, cooldown = false) { t ->
-            t.optString("kind") == "notification" && t.optString("packageName") == packageName &&
-                t.optString("textContains").let { it.isEmpty() || haystack.contains(it, ignoreCase = true) }
+        val input = mapOf(
+            "app_name" to label,
+            "notification_title" to title,
+            "notification_message" to text,
+            "notification_id" to dedupe,
+            "posted_at" to java.time.Instant.ofEpochMilli(postedAt).toString(),
+        )
+        // Filtering by text is a `match` step since schema 2.
+        fire(context, input, dedupe, cooldown = false) { t ->
+            t.optString("kind") == "notification" && t.optString("packageName") == packageName
         }
     }
 
     private fun fire(
         context: Context,
-        vars: Map<String, String>,
+        input: Map<String, String>,
         dedupeKey: String?,
         cooldown: Boolean = true,
         matches: (org.json.JSONObject) -> Boolean,
@@ -218,22 +227,68 @@ object RoutineEngine {
             if (!matches(r.trigger)) continue
             // From the stored last run: the receiver's process may have died since.
             if (cooldown && System.currentTimeMillis() - (r.lastRunAt ?: 0L) < COOLDOWN_MS) continue
-            runRoutine(context, r, vars, dedupeKey)
+            runRoutine(context, r, input, dedupeKey)
         }
     }
 
-    /** Runs every action in order and logs one run. `ask_agent` logs its own result when JS reports back. */
-    fun runRoutine(context: Context, routine: Routine, vars: Map<String, String>, dedupeKey: String?) {
+    /**
+     * Runs the steps on the trigger's [input], then every action in order,
+     * and logs one run. A skipped firing logs nothing; a failed one also goes
+     * to the failure queue. `ask_agent` and `run_tool` log their own result
+     * when JS reports back. [dedupeKey] is null when retrying a failure.
+     */
+    fun runRoutine(context: Context, routine: Routine, input: Map<String, String>, dedupeKey: String?): RunResult {
+        val store = RoutineStore.get(context)
+        val values = when (val r = RoutinePipeline.run(routine.steps, input)) {
+            is PipelineResult.Skipped -> {
+                AssistantLog.log("rotinas: ${routine.name} ignorada na etapa ${r.stepId}")
+                return RunResult("skipped", "Ignorada na etapa ${r.stepId}")
+            }
+            is PipelineResult.Failed -> {
+                store.recordRun(routine.id, "failed", r.reason)
+                reportFailure(context, routine, "step", r.stepId, r.reason, input)
+                AssistantLog.log("rotinas: ${routine.name} → failed na etapa ${r.stepId}")
+                return RunResult("failed", r.reason)
+            }
+            is PipelineResult.Completed -> r.values
+        }
         val outcomes = (0 until routine.actions.length()).map { i ->
-            ActionRunner.run(context, routine, routine.actions.getJSONObject(i), vars, dedupeKey)
+            ActionRunner.run(context, routine, routine.actions.getJSONObject(i), i, values, input, dedupeKey)
         }
         val outcome = when {
             outcomes.any { it.outcome == "blocked" } -> "blocked"
             outcomes.any { it.outcome == "failed" } -> "failed"
             else -> "done"
         }
-        RoutineStore.get(context).recordRun(routine.id, outcome, outcomes.joinToString(" · ") { it.detail })
+        val detail = outcomes.joinToString(" · ") { it.detail }
+        store.recordRun(routine.id, outcome, detail)
+        val failed = outcomes.indexOfFirst { it.outcome == "failed" }
+        if (failed >= 0) reportFailure(context, routine, "action", "ação ${failed + 1}", outcomes[failed].detail, input)
         AssistantLog.log("rotinas: ${routine.name} → $outcome")
+        return RunResult(outcome, detail)
+    }
+
+    /** Keeps the failed firing with its input and tells the user, once per routine (the notification is replaced). */
+    fun reportFailure(context: Context, routine: Routine, stage: String, where: String, reason: String, input: Map<String, String>) {
+        val store = RoutineStore.get(context)
+        store.recordFailure(routine.id, stage, where, reason, input)
+        ActionRunner.notifyFailure(context, routine, reason, store.countFailures(routine.id))
+    }
+
+    /**
+     * Runs a failure's stored input again with the routine as it is now, then
+     * drops the failure (a new failure is kept if it fails again). Dropped only
+     * after the run returns, so a crash never loses the input. The queue's
+     * dedupe key is left out on purpose; the tool avoids duplicates (e.g.
+     * `input.notification_id`). Null when the failure or its routine is gone.
+     */
+    fun retryFailure(context: Context, failureId: Long): RunResult? {
+        val store = RoutineStore.get(context)
+        val failure = store.getFailure(failureId) ?: return null
+        val routine = store.getRoutine(failure.routineId) ?: return null
+        val result = runRoutine(context, routine, failure.input, null)
+        store.deleteFailure(failureId)
+        return result
     }
 
     /** Wakes the JS runtime when the next queued `ask_agent` firing is due. */

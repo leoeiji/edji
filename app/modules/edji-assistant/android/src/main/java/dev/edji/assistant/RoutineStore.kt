@@ -9,13 +9,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** A stored routine. [trigger] and [actions] are the JSON of ADR 0005, already validated. */
+/** A stored routine. [trigger], [steps], [actions] and [examples] are the JSON of ADR 0005, already validated and migrated. */
 data class Routine(
     val id: String,
     val name: String,
     val enabled: Boolean,
     val trigger: JSONObject,
+    val steps: JSONArray,
     val actions: JSONArray,
+    val examples: JSONArray,
     val createdBy: String,
     val createdAt: Long,
     val updatedAt: Long,
@@ -26,12 +28,37 @@ data class Place(val id: String, val name: String, val latitude: Double, val lon
 
 data class RoutineRun(val id: Long, val routineId: String, val firedAt: Long, val outcome: String, val detail: String)
 
-/** An `ask_agent` firing waiting for the JS runtime. */
-data class QueuedRun(val id: Long, val routineId: String, val prompt: String, val reply: String, val firedAt: Long)
+/**
+ * A firing waiting for the JS runtime: `ask_agent` ([prompt], [reply]) or
+ * `run_tool` ([payload] holds `tool` and the resolved `args`). [input] is the
+ * trigger output, kept so a failure can go to the failure queue.
+ */
+data class QueuedRun(
+    val id: Long,
+    val routineId: String,
+    val kind: String,
+    val actionIndex: Int,
+    val prompt: String,
+    val reply: String,
+    val payload: JSONObject,
+    val input: Map<String, String>,
+    val firedAt: Long,
+)
+
+/** A failed firing kept so the routine can be fixed and the input run again (ADR 0005). [where] is a step id or "ação N". */
+data class RoutineFailure(
+    val id: Long,
+    val routineId: String,
+    val failedAt: Long,
+    val stage: String,
+    val where: String,
+    val reason: String,
+    val input: Map<String, String>,
+)
 
 /**
- * Routines, saved places, the run log and the `ask_agent` queue
- * (`edji-routines.db`, ADR 0005). Native-only like [CommandInbox]: JS reaches
+ * Routines, saved places, the run log, the queue of firings for JS
+ * (`ask_agent`, `run_tool`) and the failure queue (`edji-routines.db`, ADR 0005). Native-only like [CommandInbox]: JS reaches
  * it only through [EdjiAssistantModule], because the triggers fire while JS is dead.
  */
 class RoutineStore private constructor(context: Context) :
@@ -51,6 +78,8 @@ class RoutineStore private constructor(context: Context) :
                 trigger_json TEXT NOT NULL,
                 actions_json TEXT NOT NULL,
                 schema_version INTEGER NOT NULL,
+                steps_json TEXT NOT NULL DEFAULT '[]',
+                examples_json TEXT NOT NULL DEFAULT '[]',
                 created_by TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -81,7 +110,7 @@ class RoutineStore private constructor(context: Context) :
             )
             """.trimIndent(),
         )
-        // `prompt` is cleared as soon as a firing finishes; the row stays a while for deduplication.
+        // `prompt`, `payload_json` and `input_json` are cleared as soon as a firing finishes; the row stays a while for deduplication.
         db.execSQL(
             """
             CREATE TABLE routine_queue (
@@ -97,10 +126,37 @@ class RoutineStore private constructor(context: Context) :
             )
             """.trimIndent(),
         )
+        upgradeTo2(db, freshTables = true)
     }
 
+    /** Never drop data: each version only adds to the previous one. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Version 1 only. Never drop data: each version adds to the previous one.
+        if (oldVersion < 2) upgradeTo2(db, freshTables = false)
+    }
+
+    /** Version 2: steps and examples on routines, `run_tool` in the queue, the failure queue. */
+    private fun upgradeTo2(db: SQLiteDatabase, freshTables: Boolean) {
+        if (!freshTables) {
+            db.execSQL("ALTER TABLE routines ADD COLUMN steps_json TEXT NOT NULL DEFAULT '[]'")
+            db.execSQL("ALTER TABLE routines ADD COLUMN examples_json TEXT NOT NULL DEFAULT '[]'")
+        }
+        db.execSQL("ALTER TABLE routine_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask_agent'")
+        db.execSQL("ALTER TABLE routine_queue ADD COLUMN action_index INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE routine_queue ADD COLUMN payload_json TEXT NOT NULL DEFAULT '{}'")
+        db.execSQL("ALTER TABLE routine_queue ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}'")
+        db.execSQL(
+            """
+            CREATE TABLE routine_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                routine_id TEXT NOT NULL,
+                failed_at INTEGER NOT NULL,
+                stage TEXT NOT NULL,
+                location TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                input_json TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
     }
 
     // Routines
@@ -123,13 +179,9 @@ class RoutineStore private constructor(context: Context) :
         writableDatabase.insertOrThrow(
             "routines",
             null,
-            ContentValues().apply {
+            draftValues(draft).apply {
                 put("id", id)
-                put("name", draft.getString("name"))
                 put("enabled", 1)
-                put("trigger_json", draft.getJSONObject("trigger").toString())
-                put("actions_json", draft.getJSONArray("actions").toString())
-                put("schema_version", SCHEMA_VERSION)
                 put("created_by", createdBy)
                 put("created_at", now)
                 put("updated_at", now)
@@ -137,6 +189,22 @@ class RoutineStore private constructor(context: Context) :
         )
         return requireNotNull(getRoutine(id))
     }
+
+    /** Replaces name, trigger, steps, actions and examples of [id] with a validated draft. Keeps `enabled`. Null if missing. */
+    fun updateRoutine(id: String, draft: JSONObject, now: Long = System.currentTimeMillis()): Routine? {
+        val changed = writableDatabase.update("routines", draftValues(draft).apply { put("updated_at", now) }, "id = ?", arrayOf(id))
+        return if (changed > 0) getRoutine(id) else null
+    }
+
+    private fun draftValues(draft: JSONObject) =
+        ContentValues().apply {
+            put("name", draft.getString("name"))
+            put("trigger_json", draft.getJSONObject("trigger").toString())
+            put("steps_json", draft.optJSONArray("steps")?.toString() ?: "[]")
+            put("actions_json", draft.getJSONArray("actions").toString())
+            put("examples_json", draft.optJSONArray("examples")?.toString() ?: "[]")
+            put("schema_version", SCHEMA_VERSION)
+        }
 
     fun setEnabled(id: String, enabled: Boolean): Boolean =
         writableDatabase.update(
@@ -152,6 +220,7 @@ class RoutineStore private constructor(context: Context) :
     fun deleteRoutine(id: String): Boolean {
         val db = writableDatabase
         db.delete("routine_queue", "routine_id = ?", arrayOf(id))
+        db.delete("routine_failures", "routine_id = ?", arrayOf(id))
         return db.delete("routines", "id = ?", arrayOf(id)) > 0
     }
 
@@ -208,17 +277,34 @@ class RoutineStore private constructor(context: Context) :
         return Place(id, existing?.name ?: name, latitude, longitude, radiusM)
     }
 
-    // ask_agent queue
+    // Queue of firings for JS (ask_agent, run_tool)
 
-    /** Queues a firing. Returns false when [dedupeKey] was already queued (the same notification posted again). */
-    fun enqueue(routineId: String, prompt: String, reply: String, dedupeKey: String?, now: Long = System.currentTimeMillis()): Boolean {
+    /**
+     * Queues a firing for JS. Returns false when [dedupeKey] was already queued
+     * (the same notification posted again).
+     */
+    fun enqueue(
+        routineId: String,
+        kind: String,
+        actionIndex: Int,
+        prompt: String,
+        reply: String,
+        payload: JSONObject,
+        input: Map<String, String>,
+        dedupeKey: String?,
+        now: Long = System.currentTimeMillis(),
+    ): Boolean {
         val id = writableDatabase.insertWithOnConflict(
             "routine_queue",
             null,
             ContentValues().apply {
                 put("routine_id", routineId)
+                put("kind", kind)
+                put("action_index", actionIndex)
                 put("prompt", prompt)
                 put("reply", reply)
+                put("payload_json", payload.toString())
+                put("input_json", JSONObject(input).toString())
                 put("fired_at", now)
                 put("dedupe_key", dedupeKey)
                 put("next_attempt_at", now)
@@ -228,32 +314,46 @@ class RoutineStore private constructor(context: Context) :
         return id != -1L
     }
 
-    /** Firings due now, oldest first. Expires (and logs) the ones older than [QUEUE_TTL_MS]. */
-    fun dueRuns(now: Long = System.currentTimeMillis()): List<QueuedRun> {
+    /**
+     * Firings due now, oldest first. The ones older than [QUEUE_TTL_MS] are
+     * dropped, logged and returned in [expired] so they reach the failure queue.
+     */
+    fun dueRuns(now: Long = System.currentTimeMillis(), expired: (QueuedRun) -> Unit = {}): List<QueuedRun> {
         val db = writableDatabase
-        db.rawQuery(
-            "SELECT id, routine_id, fired_at FROM routine_queue WHERE status = 'pending' AND fired_at < ?",
+        val stale = db.rawQuery(
+            "SELECT $QUEUE_COLUMNS FROM routine_queue WHERE status = 'pending' AND fired_at < ?",
             arrayOf((now - QUEUE_TTL_MS).toString()),
-        ).use { c ->
-            while (c.moveToNext()) {
-                finish(c.getLong(0))
-                recordRun(c.getString(1), "failed", "Expirou sem conseguir falar com o agente", c.getLong(2))
-            }
+        ).use { c -> buildList { while (c.moveToNext()) add(queuedAt(c)) } }
+        for (run in stale) {
+            finish(run.id)
+            recordRun(run.routineId, "failed", EXPIRED, run.firedAt)
+            expired(run)
         }
         db.delete("routine_queue", "status != 'pending' AND fired_at < ?", arrayOf((now - QUEUE_TTL_MS * 2).toString()))
         return db.rawQuery(
-            "SELECT id, routine_id, prompt, reply, fired_at FROM routine_queue WHERE status = 'pending' AND next_attempt_at <= ? ORDER BY id",
+            "SELECT $QUEUE_COLUMNS FROM routine_queue WHERE status = 'pending' AND next_attempt_at <= ? ORDER BY id",
             arrayOf(now.toString()),
-        ).use { c ->
-            buildList { while (c.moveToNext()) add(QueuedRun(c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getLong(4))) }
-        }
+        ).use { c -> buildList { while (c.moveToNext()) add(queuedAt(c)) } }
     }
 
     fun queued(id: Long): QueuedRun? =
         readableDatabase.rawQuery(
-            "SELECT id, routine_id, prompt, reply, fired_at FROM routine_queue WHERE id = ? AND status = 'pending'",
+            "SELECT $QUEUE_COLUMNS FROM routine_queue WHERE id = ? AND status = 'pending'",
             arrayOf(id.toString()),
-        ).use { c -> if (c.moveToNext()) QueuedRun(c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getLong(4)) else null }
+        ).use { c -> if (c.moveToNext()) queuedAt(c) else null }
+
+    private fun queuedAt(c: Cursor) =
+        QueuedRun(
+            id = c.getLong(0),
+            routineId = c.getString(1),
+            kind = c.getString(2),
+            actionIndex = c.getInt(3),
+            prompt = c.getString(4),
+            reply = c.getString(5),
+            payload = JSONObject(c.getString(6)),
+            input = RoutineJson.stringMap(JSONObject(c.getString(7))),
+            firedAt = c.getLong(8),
+        )
 
     /** Marks [id] as finished and forgets its text. */
     fun finish(id: Long): Boolean =
@@ -262,6 +362,8 @@ class RoutineStore private constructor(context: Context) :
             ContentValues().apply {
                 put("status", "done")
                 put("prompt", "")
+                put("payload_json", "{}")
+                put("input_json", "{}")
             },
             "id = ? AND status = 'pending'",
             arrayOf(id.toString()),
@@ -291,23 +393,97 @@ class RoutineStore private constructor(context: Context) :
             if (c.moveToNext() && !c.isNull(0)) c.getLong(0) else null
         }
 
-    private fun routineAt(c: Cursor): Routine =
-        Routine(
+    // Failure queue
+
+    /** Keeps a failed firing with its trigger input. Prunes old rows. Returns the id. */
+    fun recordFailure(
+        routineId: String,
+        stage: String,
+        where: String,
+        reason: String,
+        input: Map<String, String>,
+        now: Long = System.currentTimeMillis(),
+    ): Long {
+        val db = writableDatabase
+        val id = db.insert(
+            "routine_failures",
+            null,
+            ContentValues().apply {
+                put("routine_id", routineId)
+                put("failed_at", now)
+                put("stage", stage)
+                put("location", where)
+                put("reason", reason)
+                put("input_json", JSONObject(input).toString())
+            },
+        )
+        pruneFailures(now)
+        return id
+    }
+
+    /** Open failures, newest first; only [routineId]'s when given. */
+    fun listFailures(routineId: String? = null, now: Long = System.currentTimeMillis()): List<RoutineFailure> {
+        pruneFailures(now)
+        val (where, args) = if (routineId == null) "" to emptyArray<String>() else "WHERE routine_id = ?" to arrayOf(routineId)
+        return readableDatabase.rawQuery("SELECT $FAILURE_COLUMNS FROM routine_failures $where ORDER BY id DESC", args).use { c ->
+            buildList { while (c.moveToNext()) add(failureAt(c)) }
+        }
+    }
+
+    fun getFailure(id: Long): RoutineFailure? =
+        readableDatabase.rawQuery("SELECT $FAILURE_COLUMNS FROM routine_failures WHERE id = ?", arrayOf(id.toString())).use { c ->
+            if (c.moveToNext()) failureAt(c) else null
+        }
+
+    fun deleteFailure(id: Long): Boolean = writableDatabase.delete("routine_failures", "id = ?", arrayOf(id.toString())) > 0
+
+    fun countFailures(routineId: String): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM routine_failures WHERE routine_id = ?", arrayOf(routineId)).use { c ->
+            if (c.moveToNext()) c.getInt(0) else 0
+        }
+
+    private fun pruneFailures(now: Long) {
+        val db = writableDatabase
+        db.delete("routine_failures", "failed_at < ?", arrayOf((now - FAILURE_TTL_MS).toString()))
+        db.execSQL("DELETE FROM routine_failures WHERE id NOT IN (SELECT id FROM routine_failures ORDER BY id DESC LIMIT $MAX_FAILURES)")
+    }
+
+    private fun failureAt(c: Cursor) =
+        RoutineFailure(c.getLong(0), c.getString(1), c.getLong(2), c.getString(3), c.getString(4), c.getString(5), RoutineJson.stringMap(JSONObject(c.getString(6))))
+
+    /** A stored routine, migrated on read to the current schema. */
+    private fun routineAt(c: Cursor): Routine {
+        val (trigger, steps, actions) = RoutineJson.migrate(
+            c.getInt(c.getColumnIndexOrThrow("schema_version")),
+            JSONObject(c.getString(c.getColumnIndexOrThrow("trigger_json"))),
+            JSONArray(c.getString(c.getColumnIndexOrThrow("steps_json"))),
+            JSONArray(c.getString(c.getColumnIndexOrThrow("actions_json"))),
+        )
+        return Routine(
             id = c.getString(c.getColumnIndexOrThrow("id")),
             name = c.getString(c.getColumnIndexOrThrow("name")),
             enabled = c.getInt(c.getColumnIndexOrThrow("enabled")) == 1,
-            trigger = JSONObject(c.getString(c.getColumnIndexOrThrow("trigger_json"))),
-            actions = JSONArray(c.getString(c.getColumnIndexOrThrow("actions_json"))),
+            trigger = trigger,
+            steps = steps,
+            actions = actions,
+            examples = JSONArray(c.getString(c.getColumnIndexOrThrow("examples_json"))),
             createdBy = c.getString(c.getColumnIndexOrThrow("created_by")),
             createdAt = c.getLong(c.getColumnIndexOrThrow("created_at")),
             updatedAt = c.getLong(c.getColumnIndexOrThrow("updated_at")),
             lastRunAt = c.getColumnIndexOrThrow("last_run_at").let { if (c.isNull(it)) null else c.getLong(it) },
         )
+    }
 
     companion object {
-        private const val DB_VERSION = 1
-        /** Version of the trigger and action JSON (`ROUTINE_SCHEMA_VERSION` in JS). */
-        const val SCHEMA_VERSION = 1
+        private const val DB_VERSION = 2
+        /** Version of the trigger, step, action and example JSON (`ROUTINE_SCHEMA_VERSION` in JS). */
+        const val SCHEMA_VERSION = 2
+        private const val QUEUE_COLUMNS = "id, routine_id, kind, action_index, prompt, reply, payload_json, input_json, fired_at"
+        private const val FAILURE_COLUMNS = "id, routine_id, failed_at, stage, location, reason, input_json"
+        const val EXPIRED = "Expirou sem conseguir rodar"
+        /** Failures leave the queue after 30 days if nobody fixes or discards them. */
+        const val FAILURE_TTL_MS = 30 * 24 * 60 * 60 * 1000L
+        private const val MAX_FAILURES = 200
         private const val MAX_RUNS = 300
         const val DEFAULT_RADIUS_M = 150.0
         /** An `ask_agent` firing gives up after a day without reaching the agent. */

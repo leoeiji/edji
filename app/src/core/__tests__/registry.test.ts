@@ -41,6 +41,16 @@ describe('registry', () => {
     expect(() => validatePlugins([{ ...todo, tools: [tool('todo.add'), tool('todo.add')] }])).toThrow('Duplicate tool');
   });
 
+  it('accepts routine actions only with flat parameters and never from routines', () => {
+    const action = (properties: Tool['parameters']['properties']): Tool => ({ ...tool('todo.add'), routineAction: true, parameters: { type: 'object', properties } });
+    expect(() => validatePlugins([{ ...todo, tools: [action({ text: { type: 'string' }, n: { type: 'integer' } })] }])).not.toThrow();
+    expect(() =>
+      validatePlugins([{ ...todo, tools: [action({ tags: { type: 'array', items: { type: 'string' } } })] }]),
+    ).toThrow('routine action parameter "tags"');
+    const routines: Plugin = { ...todo, id: 'routines', tools: [{ ...tool('routines.create'), routineAction: true }] };
+    expect(() => validatePlugins([routines])).toThrow("routines tools can't be routine actions");
+  });
+
   it('requires migrations numbered from 1 without gaps', () => {
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 2, sql: '' }] }])).toThrow('numbered');
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 1, sql: '' }, { version: 2, sql: '' }] }])).not.toThrow();

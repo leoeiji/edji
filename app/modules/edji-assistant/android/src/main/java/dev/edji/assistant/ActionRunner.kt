@@ -18,7 +18,8 @@ data class ActionOutcome(val outcome: String, val detail: String)
 
 /**
  * Runs the actions of a routine (ADR 0005), in order, off the main thread.
- * The catalog is closed: no arbitrary intents.
+ * The catalog is closed: no arbitrary intents. `ask_agent` and `run_tool`
+ * only queue work for JS.
  */
 object ActionRunner {
 
@@ -26,14 +27,28 @@ object ActionRunner {
     /** A "tap to open" notification disappears if left alone. */
     private const val TAP_TIMEOUT_MS = 2 * 60_000L
 
-    fun run(context: Context, routine: Routine, action: JSONObject, vars: Map<String, String>, dedupeKey: String?): ActionOutcome =
+    /**
+     * Runs action [index] of [routine]. [values] holds the trigger input and
+     * the step outputs, by reference; [input] is the raw trigger output,
+     * queued with JS actions so a failure can be retried.
+     */
+    fun run(
+        context: Context,
+        routine: Routine,
+        action: JSONObject,
+        index: Int,
+        values: Map<String, Any>,
+        input: Map<String, String>,
+        dedupeKey: String?,
+    ): ActionOutcome =
         try {
             when (action.getString("kind")) {
                 "open_app" -> openApp(context, routine, action.getString("packageName"), action.getString("label"))
                 "open_url" -> openUrl(context, routine, action.getString("url"))
-                "notify" -> notifyText(context, routine.name, action.getString("text"))
+                "notify" -> notifyText(context, routine.name, RoutinePipeline.fill(action.getString("text"), values))
                 "sound_mode" -> soundMode(context, action.getString("mode"))
-                "ask_agent" -> askAgent(context, routine, action, vars, dedupeKey)
+                "ask_agent" -> askAgent(context, routine, action, index, values, input, dedupeKey)
+                "run_tool" -> runTool(context, routine, action, index, values, input, dedupeKey)
                 else -> ActionOutcome("failed", "Ação desconhecida")
             }
         } catch (e: SecurityException) {
@@ -115,13 +130,56 @@ object ActionRunner {
     }
 
     /** Queues the prompt for the JS agent and wakes it. The result is logged when JS reports back. */
-    private fun askAgent(context: Context, routine: Routine, action: JSONObject, vars: Map<String, String>, dedupeKey: String?): ActionOutcome {
+    private fun askAgent(
+        context: Context,
+        routine: Routine,
+        action: JSONObject,
+        index: Int,
+        values: Map<String, Any>,
+        input: Map<String, String>,
+        dedupeKey: String?,
+    ): ActionOutcome {
         if (!RoutineEngine.isAgentAllowed(context)) return ActionOutcome("blocked", "Rotinas não podem enviar texto ao agente (Configurações)")
-        val prompt = RoutineJson.fill(action.getString("prompt"), vars)
-        val queued = RoutineStore.get(context).enqueue(routine.id, prompt, action.getString("reply"), dedupeKey?.let { "${routine.id}|$it" })
+        val prompt = RoutinePipeline.fill(action.getString("prompt"), values)
+        return enqueue(context, routine, "ask_agent", index, prompt, action.getString("reply"), JSONObject(), input, dedupeKey, "Na fila do agente")
+    }
+
+    /**
+     * Queues a plugin tool call with its arguments resolved and wakes JS,
+     * which runs the tool's handler: no model, no network, no opt-in.
+     */
+    private fun runTool(
+        context: Context,
+        routine: Routine,
+        action: JSONObject,
+        index: Int,
+        values: Map<String, Any>,
+        input: Map<String, String>,
+        dedupeKey: String?,
+    ): ActionOutcome {
+        val tool = action.getString("tool")
+        val payload = JSONObject().put("tool", tool).put("args", RoutineJson.toolArgs(action, values))
+        return enqueue(context, routine, "run_tool", index, "", "silent", payload, input, dedupeKey, "Na fila: $tool")
+    }
+
+    /** The dedupe key includes the action index, so two actions of one routine don't cancel each other. */
+    private fun enqueue(
+        context: Context,
+        routine: Routine,
+        kind: String,
+        index: Int,
+        prompt: String,
+        reply: String,
+        payload: JSONObject,
+        input: Map<String, String>,
+        dedupeKey: String?,
+        queuedDetail: String,
+    ): ActionOutcome {
+        val key = dedupeKey?.let { "${routine.id}|$index|$it" }
+        val queued = RoutineStore.get(context).enqueue(routine.id, kind, index, prompt, reply, payload, input, key)
         if (!queued) return ActionOutcome("done", "Já estava na fila")
         if (!EdjiCommandTaskService.start(context, "routine")) RoutineEngine.scheduleQueueWakeup(context)
-        return ActionOutcome("done", "Na fila do agente")
+        return ActionOutcome("done", queuedDetail)
     }
 
     /** Shows the agent's reply of an `ask_agent` routine. */
@@ -129,11 +187,28 @@ object ActionRunner {
         if (canNotify(context)) post(context, routineName, text, null, null)
     }
 
+    /**
+     * Tells the user a routine failed. One notification per routine, replaced
+     * on each failure, so a broken pattern doesn't flood the shade. Tapping
+     * opens the Rotinas screen.
+     */
+    fun notifyFailure(context: Context, routine: Routine, reason: String, openFailures: Int) {
+        if (!canNotify(context)) return
+        val title = if (openFailures > 1) "Rotina ${routine.name} falhou $openFailures vezes" else "Rotina ${routine.name} falhou"
+        val tap = PendingIntent.getActivity(
+            context,
+            routine.id.hashCode(),
+            Intent(Intent.ACTION_VIEW, Uri.parse("edji://routines")).setPackage(context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        post(context, title, "$reason Peça ao Edji para corrigir.", tap, null, id = "failure|${routine.id}".hashCode())
+    }
+
     private fun canNotify(context: Context): Boolean =
         if (Build.VERSION.SDK_INT >= 33) DevicePermissions.has(context, Manifest.permission.POST_NOTIFICATIONS)
         else context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
 
-    private fun post(context: Context, title: String, text: String, tap: PendingIntent?, timeoutMs: Long?) {
+    private fun post(context: Context, title: String, text: String, tap: PendingIntent?, timeoutMs: Long?, id: Int = Random.nextInt(1, Int.MAX_VALUE)) {
         val nm = context.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Rotinas", NotificationManager.IMPORTANCE_HIGH))
@@ -146,6 +221,6 @@ object ActionRunner {
             .setAutoCancel(true)
         if (tap != null) builder.setContentIntent(tap)
         if (timeoutMs != null) builder.setTimeoutAfter(timeoutMs)
-        nm.notify(Random.nextInt(1, Int.MAX_VALUE), builder.build())
+        nm.notify(id, builder.build())
     }
 }

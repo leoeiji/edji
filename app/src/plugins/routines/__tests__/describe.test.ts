@@ -1,4 +1,4 @@
-import { describeRoutine } from '../describe';
+import { describeRoutine, describeStep } from '../describe';
 import type { Action, Trigger } from '../types';
 
 const ctx = { placeName: (id: string) => ({ home: 'Casa' })[id] };
@@ -38,13 +38,31 @@ describe('describeRoutine', () => {
   it('describes notification routines and links', () => {
     expect(
       say({ kind: 'notification', packageName: 'com.nu.production', appLabel: 'Nubank' }, [
-        { kind: 'ask_agent', prompt: 'Registre: {text}', reply: 'silent' },
+        { kind: 'ask_agent', prompt: 'Registre: {input.notification_message}', reply: 'silent' },
       ]),
     ).toBe('Ao chegar notificação do Nubank, perguntar ao agente.');
     expect(
-      say({ kind: 'notification', packageName: 'com.nu.production', appLabel: 'Nubank', textContains: 'Pix' }, [
+      say({ kind: 'notification', packageName: 'com.nu.production', appLabel: 'Nubank' }, [
         { kind: 'open_url', url: 'https://www.nubank.com.br/app' },
+        { kind: 'run_tool', tool: 'finance.add', input: {} },
       ]),
-    ).toBe('Ao chegar notificação do Nubank com “Pix”, abrir o link nubank.com.br.');
+    ).toBe('Ao chegar notificação do Nubank, abrir o link nubank.com.br e executar finance.add.');
+  });
+});
+
+describe('describeStep', () => {
+  const text = { ref: 'input.notification_message' };
+
+  it('names what each step does, in Portuguese', () => {
+    expect(describeStep({ id: 'only_purchases', kind: 'match', input: { text }, contains: 'compra', onNoMatch: 'skip' })).toBe(
+      'seguir só se tiver “compra”',
+    );
+    expect(
+      describeStep({ id: 'extract_from_message', kind: 'extract', input: { text }, pattern: 'R\\$ (?<value>[\\d,.]+) em (?<merchant>.+)', onNoMatch: 'fail' }),
+    ).toBe('extrair value e merchant (extract_from_message)');
+    expect(describeStep({ id: 'filter', kind: 'extract', input: { text }, pattern: '^Compra', onNoMatch: 'skip' })).toBe(
+      'conferir o texto com a regex, senão ignorar (filter)',
+    );
+    expect(describeStep({ id: 'amount', kind: 'number', input: { text }, format: 'pt-BR' })).toBe('converter em número (amount)');
   });
 });

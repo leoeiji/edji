@@ -1,4 +1,4 @@
-import type { Action, RoutineDraft, Trigger, Weekday } from './types';
+import type { Action, RoutineDraft, Step, Trigger, Weekday } from './types';
 
 /** Resolves names the routine only references by id. */
 export type DescribeContext = { placeName(placeId: string): string | undefined };
@@ -26,9 +26,22 @@ export function describeTrigger(trigger: Trigger, ctx: DescribeContext): string 
     case 'time':
       return `${describeDays(trigger.days)} às ${trigger.at}`;
     case 'notification':
-      return trigger.textContains
-        ? `Ao chegar notificação do ${trigger.appLabel} com “${trigger.textContains}”`
-        : `Ao chegar notificação do ${trigger.appLabel}`;
+      return `Ao chegar notificação do ${trigger.appLabel}`;
+  }
+}
+
+/** One step in Portuguese, for the routine's detail screen: "extrair value e merchant (extract_from_message)". */
+export function describeStep(step: Step): string {
+  switch (step.kind) {
+    case 'match':
+      return `seguir só se tiver “${step.contains}”${step.onNoMatch === 'fail' ? ', senão falhar' : ''}`;
+    case 'extract': {
+      const groups = [...step.pattern.matchAll(/\(\?P?<([a-z][a-z0-9_]*)>/g)].map((m) => m[1]);
+      const what = groups.length ? `extrair ${joinPt(groups)}` : 'conferir o texto com a regex';
+      return `${what}${step.onNoMatch === 'skip' ? ', senão ignorar' : ''} (${step.id})`;
+    }
+    case 'number':
+      return `converter em número (${step.id})`;
   }
 }
 
@@ -49,6 +62,8 @@ export function describeAction(action: Action): string {
       }[action.mode];
     case 'ask_agent':
       return action.reply === 'notify' ? 'perguntar ao agente e avisar a resposta' : 'perguntar ao agente';
+    case 'run_tool':
+      return `executar ${action.tool}`;
   }
 }
 

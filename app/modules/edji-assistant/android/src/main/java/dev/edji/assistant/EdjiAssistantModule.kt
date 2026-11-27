@@ -93,19 +93,67 @@ class EdjiAssistantModule : Module() {
 
         AsyncFunction("listRoutines") { RoutineStore.get(context).listRoutines().map(RoutineJson::routineToMap) }
 
-        /** Validates again, stores the routine enabled and registers its trigger. */
+        /** Validates again (examples included), stores the routine enabled and registers its trigger. */
         AsyncFunction("saveRoutine") { draft: Map<String, Any?> ->
             val store = RoutineStore.get(context)
-            val clean = try {
-                RoutineJson.validate(JSONObject(draft), store.listPlaces().map { it.id }.toSet())
-            } catch (e: IllegalArgumentException) {
-                throw CodedException("ERR_ROUTINE", e.message ?: "Não entendi a rotina.", null)
-            }
-            val routine = store.insertRoutine(clean, "agent")
+            val routine = store.insertRoutine(validated(draft), "agent")
             RoutineEngine.sync(context)
             AssistantLog.log("rotinas: criada ${routine.name}")
             RoutineJson.routineToMap(routine)
         }
+
+        /** Replaces a routine with a validated draft (examples included). Null if the id is unknown. */
+        AsyncFunction("updateRoutine") { id: String, draft: Map<String, Any?> ->
+            val store = RoutineStore.get(context)
+            val routine = store.updateRoutine(id, validated(draft)) ?: return@AsyncFunction null
+            RoutineEngine.sync(context)
+            AssistantLog.log("rotinas: alterada ${routine.name}")
+            RoutineJson.routineToMap(routine)
+        }
+
+        /**
+         * Dry run of a draft on its examples, on [samples] (trigger outputs)
+         * and on the stored input of [failureIds]. Nothing runs or is stored.
+         */
+        AsyncFunction("testRoutine") { draft: Map<String, Any?>, samples: List<Map<String, Any?>>, failureIds: List<Double> ->
+            val store = RoutineStore.get(context)
+            val clean = validated(draft, runExamples = false)
+            val examples = clean.getJSONArray("examples")
+            val cases = buildList {
+                for (i in 0 until examples.length()) add("exemplo ${i + 1}" to RoutineJson.stringMap(examples.getJSONObject(i).getJSONObject("input")))
+                samples.forEachIndexed { i, s -> add("amostra ${i + 1}" to s.mapValues { (_, v) -> v?.toString().orEmpty() }) }
+                for (id in failureIds) store.getFailure(id.toLong())?.let { add("falha ${it.id}" to it.input) }
+            }
+            RoutineJson.test(clean, cases)
+        }
+
+        /** Notifications of [packageName] showing now, newest first. Read live, never stored. */
+        AsyncFunction("activeNotifications") { packageName: String ->
+            val listener = EdjiNotificationListener.instance
+                ?: throw CodedException("ERR_NOTIFICATIONS", "Falta permitir acesso a notificações. Abra Permissões.", null)
+            listener.active(packageName)
+        }
+
+        AsyncFunction("listFailures") { routineId: String? ->
+            RoutineStore.get(context).listFailures(routineId).map {
+                mapOf(
+                    "id" to it.id.toDouble(),
+                    "routineId" to it.routineId,
+                    "failedAt" to it.failedAt.toDouble(),
+                    "stage" to it.stage,
+                    "where" to it.where,
+                    "reason" to it.reason,
+                    "input" to it.input,
+                )
+            }
+        }
+
+        /** Runs a failure's input again with the routine as it is now. Null if the failure is gone. */
+        AsyncFunction("retryFailure") { id: Double ->
+            RoutineEngine.retryFailure(context, id.toLong())?.let { mapOf("outcome" to it.outcome, "detail" to it.detail) }
+        }
+
+        AsyncFunction("discardFailure") { id: Double -> RoutineStore.get(context).deleteFailure(id.toLong()) }
 
         AsyncFunction("deleteRoutine") { id: String ->
             RoutineStore.get(context).deleteRoutine(id).also { RoutineEngine.sync(context) }
@@ -142,14 +190,23 @@ class EdjiAssistantModule : Module() {
 
         AsyncFunction("listLaunchableApps") { DeviceInfo.launchableApps(context) }
 
-        /** `ask_agent` firings due now; expired ones are logged and dropped. */
+        /** `ask_agent` and `run_tool` firings due now; expired ones are logged, dropped and kept as failures. */
         AsyncFunction("pendingRoutineRuns") {
-            RoutineStore.get(context).dueRuns().map {
-                mapOf("id" to it.id.toDouble(), "routineId" to it.routineId, "prompt" to it.prompt, "reply" to it.reply, "firedAt" to it.firedAt.toDouble())
+            val store = RoutineStore.get(context)
+            store.dueRuns(expired = { run -> keepFailure(run, RoutineStore.EXPIRED) }).map {
+                val base = mapOf("id" to it.id.toDouble(), "routineId" to it.routineId, "kind" to it.kind, "firedAt" to it.firedAt.toDouble())
+                if (it.kind == "run_tool") {
+                    base + mapOf("tool" to it.payload.optString("tool"), "args" to RoutineJson.toValue(it.payload.optJSONObject("args") ?: JSONObject()))
+                } else {
+                    base + mapOf("prompt" to it.prompt, "reply" to it.reply)
+                }
             }
         }
 
-        /** Reports an `ask_agent` firing: `done`, `failed`, `blocked` or `retry` (kept queued, retried later). */
+        /**
+         * Reports a queued firing: `done`, `failed` (also kept in the failure
+         * queue), `blocked` or `retry` (kept queued, retried later).
+         */
         AsyncFunction("completeRoutineRun") { id: Double, outcome: String, detail: String, notifyText: String? ->
             val store = RoutineStore.get(context)
             val run = store.queued(id.toLong()) ?: return@AsyncFunction false
@@ -160,6 +217,7 @@ class EdjiAssistantModule : Module() {
             require(outcome in setOf("done", "failed", "blocked")) { "Unknown outcome $outcome" }
             store.finish(run.id)
             store.recordRun(run.routineId, outcome, detail, run.firedAt)
+            if (outcome == "failed") keepFailure(run, detail)
             if (notifyText != null) {
                 val name = store.getRoutine(run.routineId)?.name ?: "Edji"
                 ActionRunner.notifyReply(context, name, notifyText)
@@ -197,6 +255,20 @@ class EdjiAssistantModule : Module() {
                 context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
+    }
+
+    /** Validates a draft from JS; a bad one rejects with the short Portuguese reason. */
+    private fun validated(draft: Map<String, Any?>, runExamples: Boolean = true): JSONObject =
+        try {
+            RoutineJson.validate(JSONObject(draft), RoutineStore.get(context).listPlaces().map { it.id }.toSet(), runExamples)
+        } catch (e: IllegalArgumentException) {
+            throw CodedException("ERR_ROUTINE", e.message ?: "Não entendi a rotina.", null)
+        }
+
+    /** A queued firing that failed in JS (or expired) goes to the failure queue with its trigger input. */
+    private fun keepFailure(run: QueuedRun, reason: String) {
+        val routine = RoutineStore.get(context).getRoutine(run.routineId) ?: return
+        RoutineEngine.reportFailure(context, routine, "action", "ação ${run.actionIndex + 1}", reason, run.input)
     }
 
     private fun placeToMap(p: Place): Map<String, Any> =

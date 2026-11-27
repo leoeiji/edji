@@ -1,12 +1,12 @@
-import { EdjiAssistant, assistantLog, type PendingCommand, type PendingRoutineRun } from '../../modules/edji-assistant';
+import { EdjiAssistant, assistantLog, type AgentRoutineRun, type PendingCommand, type RoutineToolRun } from '../../modules/edji-assistant';
 import { PLUGINS } from '@/plugins';
 import { MESSAGES, ROUTINE_INSTRUCTIONS, runAgent, type AgentResult, type AgentTool, type ChatMessage } from '@/agent/agent';
 import { getDb, loadPluginStates, migratePlugins } from './db';
 import { emitChanged } from './events';
 import { openRouterModel } from '@/agent/openrouter';
-import type { PluginContext } from './plugin';
-import { enabledPlugins, validatePlugins } from './registry';
-import { loadModelSettings } from '@/agent/settings';
+import type { PluginContext, Tool } from './plugin';
+import { availableTools, enabledPlugins, validatePlugins } from './registry';
+import { loadModelSettings, type ModelSettings } from '@/agent/settings';
 
 let ready: Promise<void> | null = null;
 
@@ -21,17 +21,21 @@ export function ensureReady(): Promise<void> {
 
 export async function contextFor(pluginId: string): Promise<PluginContext> {
   const db = await getDb();
-  return { db, notifyChanged: () => emitChanged(pluginId) };
+  return {
+    db,
+    notifyChanged: () => emitChanged(pluginId),
+    enabledTools: async () => availableTools(PLUGINS, await loadPluginStates(db)),
+  };
 }
 
-/** Tools of the enabled plugins, bound to their context, for the agent. */
-export async function agentTools(exclude: (pluginId: string) => boolean = () => false): Promise<AgentTool[]> {
+/** Tools of the enabled plugins that pass [include], bound to their context, for the agent. */
+export async function agentTools(include: (tool: Tool<any>, pluginId: string) => boolean = () => true): Promise<AgentTool[]> {
   const states = await loadPluginStates(await getDb());
-  const plugins = enabledPlugins(PLUGINS, states).filter((p) => !exclude(p.id));
+  const plugins = enabledPlugins(PLUGINS, states);
   const bound = await Promise.all(
     plugins.map(async (p) => {
       const ctx = await contextFor(p.id);
-      return (p.tools ?? []).map(
+      return (p.tools ?? []).filter((t) => include(t, p.id)).map(
         (t): AgentTool => ({
           name: t.name,
           description: t.description,
@@ -120,10 +124,12 @@ export function messagesFor(c: Pick<PendingCommand, 'text' | 'history'>): ChatMe
 let routineProcessing: Promise<number> | null = null;
 
 /**
- * Runs every queued `ask_agent` firing (ADR 0005). Single-flight, like the
- * voice commands. Routines run with nobody present, so the agent gets
- * [ROUTINE_INSTRUCTIONS] and never the routines tools: text from a
- * notification must not be able to create or change routines.
+ * Runs every queued routine firing (ADR 0005): `run_tool` calls the plugin
+ * tool directly; `ask_agent` asks the agent. Single-flight, like the voice
+ * commands. Routines run with nobody present, so the agent gets
+ * [ROUTINE_INSTRUCTIONS] and only the tools marked `routineAction` (never
+ * routines tools, never ones that delete): text from a notification must not
+ * be able to create or change routines, or erase data.
  */
 export function processPendingRoutineRuns(): Promise<number> {
   routineProcessing ??= runRoutines().finally(() => {
@@ -140,30 +146,59 @@ async function runRoutines(): Promise<number> {
   await ensureReady();
   const runs = await EdjiAssistant.pendingRoutineRuns();
   if (runs.length === 0) return 0;
-  const [settings, tools] = await Promise.all([loadModelSettings(), agentTools((id) => id === 'routines')]);
+  // The model and its tools load only when some firing asks the agent.
+  let agent: Promise<[ModelSettings, AgentTool[]]> | null = null;
   for (const run of runs) {
-    const result = await runAgent({
-      messages: [{ role: 'user', content: run.prompt }],
-      settings,
-      tools,
-      instructions: ROUTINE_INSTRUCTIONS,
-      createModel: openRouterModel,
-    });
-    const report = routineReport(run, result);
+    let report: RoutineReport;
+    if (run.kind === 'run_tool') {
+      report = await runRoutineTool(run);
+    } else {
+      agent ??= Promise.all([loadModelSettings(), agentTools((t) => t.routineAction === true)]);
+      const [settings, tools] = await agent;
+      const result = await runAgent({
+        messages: [{ role: 'user', content: run.prompt }],
+        settings,
+        tools,
+        instructions: ROUTINE_INSTRUCTIONS,
+        createModel: openRouterModel,
+      });
+      report = routineReport(run, result);
+    }
     await EdjiAssistant.completeRoutineRun(run.id, report.outcome, report.detail, report.notifyText);
     assistantLog(`rotina: execução ${run.id} → ${report.outcome}`);
   }
   return runs.length;
 }
 
+export type RoutineReport = { outcome: 'done' | 'failed' | 'blocked' | 'retry'; detail: string; notifyText: string | null };
+
+/** Longest tool reply kept in the run log. */
+const MAX_DETAIL_LENGTH = 120;
+
+/**
+ * Calls the tool of a `run_tool` firing. Checked again here: the plugin may
+ * have been turned off, or the tool unmarked, since the routine was saved.
+ */
+export async function runRoutineTool(run: Pick<RoutineToolRun, 'tool' | 'args'>): Promise<RoutineReport> {
+  const states = await loadPluginStates(await getDb());
+  const plugin = enabledPlugins(PLUGINS, states).find((p) => p.tools?.some((t) => t.name === run.tool && t.routineAction));
+  const tool = plugin?.tools?.find((t) => t.name === run.tool);
+  if (!plugin || !tool) return { outcome: 'blocked', detail: `${run.tool} não está disponível (plugin desligado?)`, notifyText: null };
+  try {
+    const result = await tool.run(run.args, await contextFor(plugin.id));
+    // A success reply may quote the notification ("gasto em PADARIA X"), so the run log keeps a generic detail.
+    if (result.ok) return { outcome: 'done', detail: `${run.tool}: feito`, notifyText: null };
+    return { outcome: 'failed', detail: result.reply.slice(0, MAX_DETAIL_LENGTH), notifyText: null };
+  } catch {
+    return { outcome: 'failed', detail: `Algo falhou em ${run.tool}`, notifyText: null };
+  }
+}
+
 /**
  * How an `ask_agent` firing ended. The detail goes to the run log, so it
  * never carries the agent's reply (which may quote the notification).
  */
-export function routineReport(
-  run: Pick<PendingRoutineRun, 'reply'>,
-  result: AgentResult,
-): { outcome: 'done' | 'failed' | 'blocked' | 'retry'; detail: string; notifyText: string | null } {
+export function routineReport(run: Pick<AgentRoutineRun, 'reply'>, result: AgentResult): RoutineReport {
   switch (result.status) {
     case 'done':
       return { outcome: 'done', detail: 'Agente respondeu', notifyText: run.reply === 'notify' ? result.reply : null };
