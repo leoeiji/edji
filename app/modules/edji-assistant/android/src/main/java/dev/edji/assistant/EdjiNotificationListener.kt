@@ -1,6 +1,7 @@
 package dev.edji.assistant
 
 import android.app.Notification
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -53,7 +54,17 @@ class EdjiNotificationListener : NotificationListenerService() {
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0 || n.flags and Notification.FLAG_ONGOING_EVENT != 0) return null
         val extras = n.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
+        val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES).orEmpty()
+            .mapNotNull { (it as? Bundle)?.getCharSequence("text") }
+        val text = NotificationText.pick(
+            bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
+            text = extras.getCharSequence(Notification.EXTRA_TEXT),
+            lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.toList().orEmpty(),
+            messages = messages,
+            subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT),
+            ticker = n.tickerText,
+            title = title,
+        )
         if (title.isEmpty() && text.isEmpty()) return null
         return title to text
     }
