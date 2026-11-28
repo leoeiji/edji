@@ -4,8 +4,8 @@
 # The tag must match "version" in app/package.json, the single source of the
 # app version (app.config.ts reads it). Bump it with `npm version X.Y.Z` in app/.
 #
-# The APK is signed with the Edji release key (secrets ANDROID_KEYSTORE_BASE64,
-# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS). The app updates itself from
+# The APK is signed with the Edji release key (secrets ANDROID_KEYSTORE_BASE64
+# and ANDROID_KEYSTORE_PASSWORD; the alias is not secret). The app updates itself from
 # the latest release (ADR 0007): it looks for an asset named edji-<version>.apk
 # with a sha256 digest, and Android only installs it over the app if the key
 # is the same. Never rename the asset or change the key.
@@ -99,7 +99,9 @@ jobs:
         env:
           EDJI_KEYSTORE_FILE: ${{ runner.temp }}/edji-release.jks
           EDJI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          EDJI_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # Not a secret on purpose: GitHub drops job outputs containing a secret's
+          # value, and "edji" is in the APK name that build-android outputs.
+          EDJI_KEY_ALIAS: edji
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Name APK
