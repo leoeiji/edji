@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getDb, loadPluginStates } from '@/core/db';
 import type { Plugin, PluginContext } from '@/core/plugin';
-import { enabledPlugins, type PluginStates } from '@/core/registry';
-import { contextFor, ensureReady } from '@/core/runtime';
+import { applyEnabledStates, enabledPlugins, type PluginStates } from '@/core/registry';
+import { contextFor, ensureReady, processPendingRoutineRuns } from '@/core/runtime';
 import { PLUGINS } from '@/plugins';
 
 /**
@@ -14,7 +14,9 @@ export function usePlugins() {
   const [contexts, setContexts] = useState<Record<string, PluginContext>>({});
 
   const reload = useCallback(async () => {
-    setStates(await loadPluginStates(await getDb()));
+    const loaded = await loadPluginStates(await getDb());
+    setStates(loaded);
+    await applyEnabledStates(PLUGINS, loaded);
   }, []);
 
   useEffect(() => {
@@ -23,6 +25,8 @@ export function usePlugins() {
       const entries = await Promise.all(PLUGINS.map(async (p) => [p.id, await contextFor(p.id)] as const));
       setContexts(Object.fromEntries(entries));
       await reload();
+      // Firings the background task couldn't run (Android refused to start it) run now.
+      processPendingRoutineRuns().catch(() => {});
     })();
   }, [reload]);
 

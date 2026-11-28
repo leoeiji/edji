@@ -3,6 +3,12 @@
 #   git tag v0.0.1 && git push origin v0.0.1
 # The tag must match "version" in app/package.json, the single source of the
 # app version (app.config.ts reads it). Bump it with `npm version X.Y.Z` in app/.
+#
+# The APK is signed with the Edji release key (secrets ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS). The app updates itself from
+# the latest release (ADR 0007): it looks for an asset named edji-<version>.apk
+# with a sha256 digest, and Android only installs it over the app if the key
+# is the same. Never rename the asset or change the key.
 name: Release
 
 on:
@@ -78,8 +84,22 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform android --no-install
 
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is missing; releases must be signed with the Edji key"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/edji-release.jks"
+
       - name: Build APK
         working-directory: app/android
+        env:
+          EDJI_KEYSTORE_FILE: ${{ runner.temp }}/edji-release.jks
+          EDJI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          EDJI_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Name APK
@@ -88,6 +108,21 @@ jobs:
           name="edji-${{ needs.version.outputs.version }}.apk"
           mv android/app/build/outputs/apk/release/app-release.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # SHA-256 of the Edji release certificate (public). A different key would
+      # make every installed copy refuse the update.
+      - name: Check APK signature
+        env:
+          EXPECTED_CERT_SHA256: 16f9d9692bf2809d90909ac7cb39faad0850f1e1c3ed4f8cc910f159abef1f4b
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          # "Signer #1 certificate SHA-256 digest: …" or "V2 Signer: certificate SHA-256 digest: …", by build-tools version.
+          actual=$("$apksigner" verify --print-certs "${{ steps.apk.outputs.name }}" | sed -n 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | sort -u)
+          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::APK signed with $actual, expected the Edji release key"
+            exit 1
+          fi
+          echo "Signed with the Edji release key ✓"
 
       - uses: actions/upload-artifact@v4
         with:

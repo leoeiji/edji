@@ -1,58 +1,65 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { loadModelSettings, saveApiKey, saveModel } from '@/agent/settings';
+import { loadModelSettings, saveApiKey, saveLightModel, saveModel } from '@/agent/settings';
 import { useTheme } from '@/theme';
 import { settingsStyles as styles } from './styles';
 
+type Field = 'key' | 'model' | 'light';
+
+const FIELDS: Field[] = ['key', 'model', 'light'];
+
+const SAVE: Record<Field, (value: string) => Promise<void>> = { key: saveApiKey, model: saveModel, light: saveLightModel };
+
+function savedMessage(field: Field, value: string): string {
+  if (field === 'key') return value.trim() ? 'Chave salva.' : 'Chave apagada.';
+  if (field === 'model') return 'Modelo salvo.';
+  return value.trim() ? 'Modelo leve salvo.' : 'Modelo leve apagado.';
+}
+
 /**
- * OpenRouter key and model. Filling in the key is the opt-in to the network:
- * without it, nothing leaves the phone. Each field saves shortly after typing
- * stops, when it loses focus, and when the screen goes away.
+ * OpenRouter key, conversation model and light model. Filling in the key is
+ * the opt-in to the network: without it, nothing leaves the phone. Each field
+ * saves shortly after typing stops, when it loses focus, and when the screen
+ * goes away.
  */
 export function ModelSettings() {
   const t = useTheme();
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('');
+  const [values, setValues] = useState<Record<Field, string>>({ key: '', model: '', light: '' });
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
-    loadModelSettings().then((s) => {
-      setApiKey(s.apiKey ?? '');
-      setModel(s.model ?? '');
-    });
+    loadModelSettings().then((s) => setValues({ key: s.apiKey ?? '', model: s.model ?? '', light: s.lightModel ?? '' }));
   }, []);
 
   // Unsaved edits per field; flushed on a timer, on blur and on unmount.
-  const pending = useRef<{ key?: string; model?: string }>({});
-  const timers = useRef<{ key?: ReturnType<typeof setTimeout>; model?: ReturnType<typeof setTimeout> }>({});
+  const pending = useRef<Partial<Record<Field, string>>>({});
+  const timers = useRef<Partial<Record<Field, ReturnType<typeof setTimeout>>>>({});
 
-  const persist = (what: 'key' | 'model', value: string) => (what === 'key' ? saveApiKey(value) : saveModel(value));
-
-  const flush = async (what: 'key' | 'model') => {
-    clearTimeout(timers.current[what]);
-    const value = pending.current[what];
+  const flush = async (field: Field) => {
+    clearTimeout(timers.current[field]);
+    const value = pending.current[field];
     if (value === undefined) return;
-    delete pending.current[what];
-    await persist(what, value);
-    setSaved(what === 'key' ? (value.trim() ? 'Chave salva.' : 'Chave apagada.') : 'Modelo salvo.');
+    delete pending.current[field];
+    await SAVE[field](value);
+    setSaved(savedMessage(field, value));
   };
 
-  const edit = (what: 'key' | 'model', value: string) => {
-    (what === 'key' ? setApiKey : setModel)(value);
+  const edit = (field: Field, value: string) => {
+    setValues((v) => ({ ...v, [field]: value }));
     setSaved(null);
-    pending.current[what] = value;
-    clearTimeout(timers.current[what]);
-    timers.current[what] = setTimeout(() => flush(what), 600);
+    pending.current[field] = value;
+    clearTimeout(timers.current[field]);
+    timers.current[field] = setTimeout(() => flush(field), 600);
   };
 
   useEffect(
     () => () => {
       // Leaving the screen (e.g. through the side panel) must not lose a pasted key.
-      for (const what of ['key', 'model'] as const) {
-        clearTimeout(timers.current[what]);
-        const value = pending.current[what];
-        if (value !== undefined) persist(what, value);
+      for (const field of FIELDS) {
+        clearTimeout(timers.current[field]);
+        const value = pending.current[field];
+        if (value !== undefined) SAVE[field](value);
       }
     },
     [],
@@ -76,7 +83,7 @@ export function ModelSettings() {
           <View style={[...input, styles.inputRow]}>
             <TextInput
               accessibilityLabelledBy="apiKeyLabel"
-              value={apiKey}
+              value={values.key}
               onChangeText={(v) => edit('key', v)}
               onEndEditing={() => flush('key')}
               secureTextEntry={!showKey}
@@ -98,7 +105,7 @@ export function ModelSettings() {
           </Text>
           <TextInput
             accessibilityLabelledBy="modelLabel"
-            value={model}
+            value={values.model}
             onChangeText={(v) => edit('model', v)}
             onEndEditing={() => flush('model')}
             autoCapitalize="none"
@@ -110,11 +117,33 @@ export function ModelSettings() {
           <Text style={[styles.hint, { color: t.muted }]}>Use o ID do modelo como aparece no OpenRouter.</Text>
         </View>
 
+        <View style={styles.field}>
+          <Text style={[styles.fieldLabel, { color: t.text }]} nativeID="lightModelLabel">
+            Modelo leve
+          </Text>
+          <TextInput
+            accessibilityLabelledBy="lightModelLabel"
+            value={values.light}
+            onChangeText={(v) => edit('light', v)}
+            onEndEditing={() => flush('light')}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="autor/modelo-pequeno"
+            placeholderTextColor={t.muted}
+            style={[...input, styles.inputSolo]}
+          />
+          <Text style={[styles.hint, { color: t.muted }]}>
+            Para tarefas rápidas fora da conversa. Hoje: dar título às conversas. Vazio, o título são as primeiras
+            palavras do pedido.
+          </Text>
+        </View>
+
         {saved && <Text style={[styles.hint, { color: t.accent, fontWeight: '700' }]}>{saved}</Text>}
         <View style={[styles.divider, { backgroundColor: t.line }]} />
         <Text style={[styles.hint, { color: t.muted }]}>
           O que você fala é transcrito no aparelho. Só o texto vai para o OpenRouter, e só depois que você coloca a
-          chave. A chave fica guardada neste celular.
+          chave. O modelo leve recebe só o primeiro pedido e a primeira resposta de cada conversa. A chave fica
+          guardada neste celular.
         </Text>
       </View>
     </>
