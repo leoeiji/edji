@@ -24,6 +24,8 @@ import {
 } from '../chatStore';
 
 jest.mock('expo-sqlite', () => ({ openDatabaseAsync: jest.fn() }));
+const mockRemoveFiles = jest.fn(async (_uris: string[]) => {});
+jest.mock('../attachmentFiles', () => ({ removeFiles: (uris: string[]) => mockRemoveFiles(uris) }));
 
 let db: SQLiteDatabase;
 
@@ -38,7 +40,7 @@ const count = async (table: string) => (await db.getFirstAsync<{ n: number }>(`S
 describe('chat migrations', () => {
   it('apply once and record the version', async () => {
     await applyMigrations(db, CHAT_SCHEMA_ID, CHAT_MIGRATIONS); // second run is a no-op, not a "table exists" error
-    expect(await db.getFirstAsync('SELECT version FROM plugin_schema WHERE id = ?', CHAT_SCHEMA_ID)).toEqual({ version: 1 });
+    expect(await db.getFirstAsync('SELECT version FROM plugin_schema WHERE id = ?', CHAT_SCHEMA_ID)).toEqual({ version: 2 });
   });
 });
 
@@ -153,5 +155,43 @@ describe('voice setting', () => {
     expect(await savesVoiceConversations(db)).toBe(false);
     await setSetting(db, SAVE_VOICE_SETTING, '1');
     expect(await savesVoiceConversations(db)).toBe(true);
+  });
+});
+
+describe('attachments', () => {
+  const photo = { type: 'attachment' as const, kind: 'image' as const, uri: 'file:///a/cupom.jpg', name: 'cupom.jpg', mime: 'image/jpeg', size: 1000 };
+  const sheet = { type: 'attachment' as const, kind: 'file' as const, uri: 'file:///a/gastos.csv', name: 'gastos.csv', mime: 'text/csv', size: 300 };
+
+  beforeEach(() => mockRemoveFiles.mockClear());
+
+  it('stores and reloads attachment parts in order, next to the text', async () => {
+    const c = await createConversation(db, { title: 'x', origin: 'app' });
+    await addMessage(db, c.id, { role: 'user', status: 'done', parts: [photo, sheet, { type: 'text', text: 'olha' }] });
+    const [m] = await loadMessages(db, c.id);
+    expect(m.parts).toEqual([photo, sheet, { type: 'text', text: 'olha' }]);
+  });
+
+  it('keeps attachments out of what goes back to the assistant side of the history', async () => {
+    const c = await createConversation(db, { title: 'x', origin: 'app' });
+    await addMessage(db, c.id, { role: 'user', status: 'done', parts: [photo, { type: 'text', text: 'olha' }] });
+    expect(historyFor(await loadMessages(db, c.id))).toEqual([{ role: 'user', content: 'olha' }]);
+  });
+
+  it('deletes the files of a conversation with it, and only that conversation\'s', async () => {
+    const a = await createConversation(db, { title: 'a', origin: 'app' });
+    const b = await createConversation(db, { title: 'b', origin: 'app' });
+    await addMessage(db, a.id, { role: 'user', status: 'done', parts: [photo] });
+    await addMessage(db, b.id, { role: 'user', status: 'done', parts: [sheet] });
+    await deleteConversation(db, a.id);
+    expect(mockRemoveFiles).toHaveBeenCalledWith([photo.uri]);
+  });
+
+  it('deletes every file when all conversations go', async () => {
+    const a = await createConversation(db, { title: 'a', origin: 'app' });
+    const b = await createConversation(db, { title: 'b', origin: 'app' });
+    await addMessage(db, a.id, { role: 'user', status: 'done', parts: [photo] });
+    await addMessage(db, b.id, { role: 'user', status: 'done', parts: [sheet] });
+    await deleteAllConversations(db);
+    expect(mockRemoveFiles).toHaveBeenCalledWith([photo.uri, sheet.uri]);
   });
 });

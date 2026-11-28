@@ -77,3 +77,12 @@ describe('patchReleaseSigning', () => {
     expect(() => patchReleaseSigning('android { buildTypes { release { } } }')).toThrow('no longer matches');
   });
 });
+
+describe('permissions', () => {
+  it('keeps the microphone for voice: the image picker plugin must not block RECORD_AUDIO', () => {
+    expect(config.android?.permissions).toContain('android.permission.RECORD_AUDIO');
+    const picker = config.plugins?.find((p) => Array.isArray(p) && p[0] === 'expo-image-picker') as [string, Record<string, unknown>] | undefined;
+    expect(picker).toBeDefined();
+    expect(picker?.[1].microphonePermission).not.toBe(false);
+  });
+});

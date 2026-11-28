@@ -258,6 +258,40 @@ describe('tool events', () => {
   });
 });
 
+describe('toModelMessages with attachments', () => {
+  it('puts the files before the text and turns each kind into the right part', () => {
+    const out = toModelMessages([
+      {
+        role: 'user',
+        content: 'lança esses gastos',
+        attachments: [
+          { type: 'image', name: 'cupom.jpg', mime: 'image/jpeg', data: 'AAA' },
+          { type: 'pdf', name: 'fatura.pdf', mime: 'application/pdf', data: 'BBB' },
+          { type: 'text', name: 'gastos.csv', text: 'padaria,38' },
+          { type: 'omitted', name: 'antigo.png' },
+        ],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'file', data: 'AAA', mediaType: 'image/jpeg' },
+          { type: 'file', data: 'BBB', mediaType: 'application/pdf', filename: 'fatura.pdf' },
+          { type: 'text', text: '[Arquivo: gastos.csv]\npadaria,38' },
+          { type: 'text', text: '[Anexo enviado antes: antigo.png]' },
+          { type: 'text', text: 'lança esses gastos' },
+        ],
+      },
+    ]);
+  });
+
+  it('sends only the files when the message has no text', () => {
+    const out = toModelMessages([{ role: 'user', content: '', attachments: [{ type: 'image', name: 'a.jpg', mime: 'image/jpeg', data: 'AAA' }] }]);
+    expect(out).toEqual([{ role: 'user', content: [{ type: 'file', data: 'AAA', mediaType: 'image/jpeg' }] }]);
+  });
+});
+
 describe('toModelMessages', () => {
   it('replays a turn with tools as call and result pairs, step by step', () => {
     const history: ChatMessage[] = [

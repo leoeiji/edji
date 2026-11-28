@@ -39,6 +39,56 @@ beforeEach(async () => {
   await applyMigrations(db, CHAT_SCHEMA_ID, CHAT_MIGRATIONS);
 });
 
+describe('runPersistedTurn with attachments', () => {
+  const b64 = (uri: string) => Buffer.from(uri).toString('base64');
+  const reader = { base64: async (uri: string) => b64(uri), text: async (uri: string) => `texto:${uri}` };
+  const photo = { kind: 'image' as const, uri: 'file:///a/cupom.jpg', name: 'cupom.jpg', mime: 'image/jpeg', size: 1000 };
+  const sheet = { kind: 'file' as const, uri: 'file:///a/gastos.csv', name: 'gastos.csv', mime: 'text/csv', size: 300 };
+
+  it('stores the files before the text and sends the image to the model in full', async () => {
+    const c = await createConversation(db, { title: 'Cupom', origin: 'app' });
+    const model = scripted([step(text('a', ['Era uma padaria.']))]);
+    const result = await runPersistedTurn({
+      db,
+      conversationId: c.id,
+      userText: 'o que é isso?',
+      attachments: [photo, sheet],
+      reader,
+      settings,
+      createModel: () => model,
+    });
+    expect(result.status).toBe('done');
+    const [user] = await loadMessages(db, c.id);
+    expect(user.parts).toEqual([
+      { type: 'attachment', ...photo },
+      { type: 'attachment', ...sheet },
+      { type: 'text', text: 'o que é isso?' },
+    ]);
+    const sent = JSON.stringify(model.doStreamCalls[0].prompt);
+    expect(sent).toContain(b64('file:///a/cupom.jpg'));
+    expect(sent).toContain('texto:file:///a/gastos.csv');
+  });
+
+  it('keeps an image-only message (no text) and replays earlier images as a note, text files in full', async () => {
+    const c = await createConversation(db, { title: 'Cupom', origin: 'app' });
+    await runPersistedTurn({
+      db,
+      conversationId: c.id,
+      userText: '',
+      attachments: [photo, sheet],
+      reader,
+      settings,
+      createModel: () => scripted([step(text('a', ['Anotei.']))]),
+    });
+    const second = scripted([step(text('b', ['Mesmo mercado.']))]);
+    await runPersistedTurn({ db, conversationId: c.id, userText: 'e o total?', reader, settings, createModel: () => second });
+    const sent = JSON.stringify(second.doStreamCalls[0].prompt);
+    expect(sent).not.toContain(b64('file:///a/cupom.jpg'));
+    expect(sent).toContain('[Anexo enviado antes: cupom.jpg]');
+    expect(sent).toContain('texto:file:///a/gastos.csv');
+  });
+});
+
 describe('runPersistedTurn', () => {
   it('stores text and tool calls in stream order', async () => {
     const c = await createConversation(db, { title: 'Registra…', origin: 'app' });
@@ -58,7 +108,7 @@ describe('runPersistedTurn', () => {
     const [user, reply] = await loadMessages(db, c.id);
     expect(user.parts).toEqual([{ type: 'text', text: 'registra 38 de padaria' }]);
     expect(reply.status).toBe('done');
-    expect(reply.parts.map((p) => (p.type === 'text' ? p.text : `${p.name}:${p.state}`))).toEqual([
+    expect(reply.parts.map((p) => (p.type === 'text' ? p.text : p.type === 'tool' ? `${p.name}:${p.state}` : p.name))).toEqual([
       'Vou registrar.',
       'finance.add:done',
       'Anotado.',

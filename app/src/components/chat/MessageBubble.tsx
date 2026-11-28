@@ -1,8 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import type { Attachment } from '@/agent/attachments';
 import { useTheme } from '@/theme';
+import { AttachmentList } from './AttachmentList';
 
 type Props =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; attachments?: Attachment[] }
   | { kind: 'text'; text: string }
   | { kind: 'error'; text: string; onSettings?: () => void }
   | { kind: 'thinking' }
@@ -39,16 +41,20 @@ export function MessageBubble(props: Props) {
     );
   }
   return (
-    <View style={[styles.bubble, styles.right, { backgroundColor: t.userBubble }]}>
-      <Text selectable style={[styles.text, { color: t.onUserBubble }]}>
-        {props.text}
-      </Text>
+    <View style={[styles.bubble, styles.right, { backgroundColor: t.userBubble }, props.attachments?.length ? styles.withFiles : null]}>
+      {props.attachments && props.attachments.length > 0 && <AttachmentList items={props.attachments} />}
+      {props.text !== '' && (
+        <Text selectable style={[styles.text, { color: t.onUserBubble }]}>
+          {props.text}
+        </Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bubble: { maxWidth: '86%', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  withFiles: { padding: 8 },
   left: { alignSelf: 'flex-start', borderBottomLeftRadius: 6 },
   right: { alignSelf: 'flex-end', borderBottomRightRadius: 6 },
   text: { fontSize: 16, lineHeight: 23 },

@@ -18,3 +18,23 @@ export function openRouterModel(apiKey: string, model: string): LanguageModel {
   });
   return provider.chat(model, { usage: { include: true } });
 }
+
+let modelList: Promise<unknown> | null = null;
+
+/**
+ * OpenRouter's public model list, fetched once per app run. It needs no key
+ * and carries nothing of the user's; it only runs when someone attaches an
+ * image (ADR 0009). A failure is not cached, so the next attach retries.
+ */
+export function fetchOpenRouterModels(): Promise<unknown> {
+  modelList ??= expoFetch('https://openrouter.ai/api/v1/models')
+    .then((res) => {
+      if (!res.ok) throw new Error(`models ${res.status}`);
+      return res.json();
+    })
+    .catch((e: unknown) => {
+      modelList = null;
+      throw e;
+    });
+  return modelList;
+}

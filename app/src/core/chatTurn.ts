@@ -1,9 +1,21 @@
 import type { LanguageModel } from 'ai';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { runAgent, type AgentResult, type AgentTool, type AssistantPart, type ToolEvent } from '@/agent/agent';
+import { loadForModel, type Attachment, type AttachmentReader, type ModelAttachment } from '@/agent/attachments';
 import { generateTitle } from '@/agent/light';
 import type { ModelSettings } from '@/agent/settings';
-import { addMessage, historyFor, loadMessages, savePart, setMessageStatus, settleTitle, type Conversation, type MessageStatus } from './chatStore';
+import {
+  addMessage,
+  historyFor,
+  loadMessages,
+  messageAttachments,
+  savePart,
+  setMessageStatus,
+  settleTitle,
+  type ChatPart,
+  type Conversation,
+  type MessageStatus,
+} from './chatStore';
 import { recordStep, usageRecorder } from './usage';
 
 /** How often a growing text is written to the database while it streams. */
@@ -13,6 +25,10 @@ export type TurnInput = {
   db: SQLiteDatabase;
   conversationId: number;
   userText: string;
+  /** Files added to this message, already copied into the app. */
+  attachments?: Attachment[];
+  /** Reads the stored files for the model. */
+  reader?: AttachmentReader;
   settings: ModelSettings;
   createModel(apiKey: string, model: string): LanguageModel;
   instructions?: string;
@@ -44,8 +60,23 @@ export type TurnResult = AgentResult & { messageId: number };
 export async function runPersistedTurn(input: TurnInput): Promise<TurnResult> {
   const { db, conversationId, userText } = input;
   const now = input.now ?? Date.now;
-  const history = historyFor(await loadMessages(db, conversationId));
-  const userMessageId = await addMessage(db, conversationId, { role: 'user', status: 'done', parts: [{ type: 'text', text: userText }], now: now() });
+  const attachments = input.attachments ?? [];
+  const stored = await loadMessages(db, conversationId);
+  // Earlier turns: text files in full, images and PDFs as a note (the user paid for them once).
+  const earlier = new Map<number, ModelAttachment[]>();
+  if (input.reader) {
+    for (const m of stored) {
+      const files = messageAttachments(m.parts);
+      if (m.role === 'user' && files.length) earlier.set(m.id, await loadForModel(files, input.reader, false));
+    }
+  }
+  const history = historyFor(stored, earlier);
+  const current = input.reader && attachments.length ? await loadForModel(attachments, input.reader, true) : [];
+  const userParts: ChatPart[] = [
+    ...attachments.map((a): ChatPart => ({ type: 'attachment', ...a })),
+    ...(userText ? [{ type: 'text' as const, text: userText }] : []),
+  ];
+  const userMessageId = await addMessage(db, conversationId, { role: 'user', status: 'done', parts: userParts, now: now() });
   input.onStored?.(userMessageId);
   const messageId = await addMessage(db, conversationId, { role: 'assistant', status: 'streaming', parts: [], now: now() });
 
@@ -69,7 +100,7 @@ export async function runPersistedTurn(input: TurnInput): Promise<TurnResult> {
   const changed = () => input.onParts?.(parts.slice());
 
   const result = await runAgent({
-    messages: [...history, { role: 'user', content: userText }],
+    messages: [...history, { role: 'user', content: userText, ...(current.length ? { attachments: current } : {}) }],
     settings: input.settings,
     createModel: input.createModel,
     instructions: input.instructions,

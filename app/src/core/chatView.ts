@@ -1,5 +1,6 @@
 import type { AssistantPart, ToolPart } from '@/agent/agent';
-import type { Conversation, MessageStatus, StoredMessage } from './chatStore';
+import type { Attachment } from '@/agent/attachments';
+import { messageAttachments, type ChatPart, type Conversation, type MessageStatus, type StoredMessage } from './chatStore';
 import type { UsageSummary } from './usage';
 
 /**
@@ -8,7 +9,7 @@ import type { UsageSummary } from './usage';
  * message (no key, offline); `setup` ones get a button to the settings.
  */
 export type ChatRow =
-  | { kind: 'user'; key: string; text: string }
+  | { kind: 'user'; key: string; text: string; attachments: Attachment[] }
   | { kind: 'text'; key: string; text: string; streaming: boolean }
   | { kind: 'tool'; key: string; tool: ToolPart }
   | { kind: 'error'; key: string; text: string; setup: boolean }
@@ -21,7 +22,7 @@ export type ChatRow =
  * goes, so stored messages from [fromMessageId] on are this same turn and
  * are left out while it is live.
  */
-export type LiveTurn = { userText: string; parts: AssistantPart[]; fromMessageId?: number };
+export type LiveTurn = { userText: string; attachments?: Attachment[]; parts: AssistantPart[]; fromMessageId?: number };
 
 /**
  * Rows oldest first; the screen's inverted list reverses them. A finished
@@ -33,15 +34,15 @@ export function chatRows(messages: StoredMessage[], live: LiveTurn | null, usage
   for (const m of messages) {
     if (live && cut !== undefined && m.id >= cut) continue;
     if (m.role === 'user') {
-      rows.push({ kind: 'user', key: `m${m.id}`, text: partsText(m.parts) });
+      rows.push({ kind: 'user', key: `m${m.id}`, text: partsText(m.parts), attachments: messageAttachments(m.parts) });
     } else {
-      rows.push(...replyRows(`m${m.id}`, m.parts, m.status));
+      rows.push(...replyRows(`m${m.id}`, m.parts.filter(isAssistantPart), m.status));
       const u = usage.get(m.id);
       if (u && u.totalTokens > 0 && m.status !== 'streaming') rows.push({ kind: 'usage', key: `m${m.id}-usage`, messageId: m.id, usage: u });
     }
   }
   if (live) {
-    rows.push({ kind: 'user', key: 'live-user', text: live.userText });
+    rows.push({ kind: 'user', key: 'live-user', text: live.userText, attachments: live.attachments ?? [] });
     rows.push(...replyRows('live', live.parts, 'streaming'));
   }
   return rows;
@@ -71,7 +72,11 @@ function partRows(key: string, parts: AssistantPart[], streaming: boolean): Chat
   });
 }
 
-function partsText(parts: AssistantPart[]): string {
+function isAssistantPart(p: ChatPart): p is AssistantPart {
+  return p.type !== 'attachment';
+}
+
+function partsText(parts: ChatPart[]): string {
   return parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
 }
 
