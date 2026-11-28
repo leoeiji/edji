@@ -37,6 +37,7 @@ object DevicePermissions {
             "battery_unrestricted" -> granted(
                 context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName),
             )
+            "install_updates" -> granted(AppUpdater.canInstall(context))
             else -> "unavailable"
         }
 
@@ -81,6 +82,7 @@ object DevicePermissions {
             "dnd_access" -> Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
             "background_launch" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg)
             "battery_unrestricted" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            "install_updates" -> Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, pkg)
             "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
             else -> null
         } ?: Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)

@@ -7,6 +7,7 @@ import { SidePanel } from '@/components/SidePanel';
 import { deleteConversation, findVoiceConversation, renameConversation } from '@/core/chatStore';
 import { getDb } from '@/core/db';
 import { ensureReady } from '@/core/runtime';
+import { useAppUpdate } from '@/hooks/useAppUpdate';
 import { useConversations } from '@/hooks/useConversations';
 import { useDeepLink } from '@/hooks/useDeepLink';
 import { usePlugins } from '@/hooks/usePlugins';
@@ -26,11 +27,12 @@ export default function App() {
   );
 }
 
-/** Header, current screen and side panel. Home is the chat; `conversationId` null is a new chat. */
+/** Header, current screen and side panel. Home is the chat; `conversationId` null is a new chat. Owns the in-app update state. */
 function Shell() {
   const t = useTheme();
   const { plugins, states, contexts, views, reload } = usePlugins();
   const conversations = useConversations();
+  const update = useAppUpdate();
   const [current, setCurrent] = useState<string>(HOME.key);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -62,9 +64,9 @@ function Shell() {
   const screen = () => {
     if (!states) return null;
     if (onChat) {
-      return <ChatScreen conversationId={conversationId} onCreated={setConversationId} onOpenSettings={() => setCurrent('settings')} />;
+      return <ChatScreen conversationId={conversationId} onCreated={setConversationId} onOpenSettings={() => setCurrent('settings')} update={update} />;
     }
-    if (active.key === 'settings') return <SettingsScreen plugins={plugins} states={states} onStatesChanged={reload} />;
+    if (active.key === 'settings') return <SettingsScreen plugins={plugins} states={states} onStatesChanged={reload} update={update} />;
     if (active.key === 'permissions') return <PermissionsScreen />;
     if (active.key === 'log') return <LogScreen />;
     const plugin = views.find((p) => p.id === active.key);
