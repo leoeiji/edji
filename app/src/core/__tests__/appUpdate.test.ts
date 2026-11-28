@@ -4,14 +4,18 @@ import {
   AUTO_CHECK_INTERVAL_MS,
   LAST_CHECK_SETTING,
   LATEST_RELEASE_URL,
+  RELEASES_URL,
   autoCheck,
   autoCheckDue,
   canAct,
   checkForUpdate,
   isAutoCheckEnabled,
+  isTestVersionsEnabled,
+  newestRelease,
   parseRelease,
   releaseNotes,
   setAutoCheck,
+  setTestVersions,
   statusLine,
 } from '../appUpdate';
 import { CHAT_MIGRATIONS, CHAT_SCHEMA_ID, getSetting } from '../chatStore';
@@ -49,7 +53,7 @@ describe('parseRelease', () => {
   it('takes the APK named after the version, with its digest, size and notes', () => {
     expect(parseRelease(release('v0.3.0'))).toEqual({
       version: '0.3.0',
-      versionCode: 300,
+      versionCode: 30099,
       notes: ['Add in-app update', 'Fix chat scroll'],
       pageUrl: 'https://github.com/leoeiji/edji/releases/tag/v0.3.0',
       apkUrl: 'https://github.com/leoeiji/edji/releases/download/v0.3.0/edji-0.3.0.apk',
@@ -66,6 +70,33 @@ describe('parseRelease', () => {
     expect(parseRelease(release('v1.2.3-beta'))).toBe('A versão v1.2.3-beta não tem o formato esperado.');
     expect(parseRelease(null)).toBe('Resposta inesperada do GitHub.');
     expect(parseRelease([])).toBe('Resposta inesperada do GitHub.');
+  });
+
+  it('takes a release candidate', () => {
+    expect(parseRelease(release('v0.3.0-rc.2'))).toMatchObject({
+      version: '0.3.0-rc.2',
+      versionCode: 30002,
+      apkUrl: 'https://github.com/leoeiji/edji/releases/download/v0.3.0-rc.2/edji-0.3.0-rc.2.apk',
+    });
+  });
+});
+
+describe('newestRelease', () => {
+  it('takes the highest version, whatever the order of the list', () => {
+    const list = [release('v0.3.0-rc.2', { prerelease: true }), release('v0.3.0'), release('v0.3.0-rc.1', { prerelease: true })];
+    expect(newestRelease(list)).toMatchObject({ version: '0.3.0' });
+    expect(newestRelease([release('v0.2.0'), release('v0.3.0-rc.1', { prerelease: true })])).toMatchObject({ version: '0.3.0-rc.1' });
+  });
+
+  it('skips drafts and releases the app cannot use', () => {
+    const list = [release('v0.4.0', { draft: true }), release('v0.3.1', { assets: [] }), release('v0.3.0')];
+    expect(newestRelease(list)).toMatchObject({ version: '0.3.0' });
+  });
+
+  it('says why when nothing fits', () => {
+    expect(newestRelease([])).toBe('Ainda não há versão publicada.');
+    expect(newestRelease([release('v0.3.1', { assets: [] })])).toBe('A versão 0.3.1 não tem o APK.');
+    expect(newestRelease({})).toBe('Resposta inesperada do GitHub.');
   });
 });
 
@@ -86,30 +117,45 @@ describe('releaseNotes', () => {
 describe('checkForUpdate', () => {
   it('asks the latest release of the Edji repository', async () => {
     const fetchFn = respond(200, release('v0.3.0'));
-    await checkForUpdate(200, fetchFn);
+    await checkForUpdate(200, { fetchFn });
     expect(fetchFn).toHaveBeenCalledWith(LATEST_RELEASE_URL, expect.anything());
     expect(LATEST_RELEASE_URL).toBe('https://api.github.com/repos/leoeiji/edji/releases/latest');
   });
 
+  it('asks the recent releases, candidates included, only with test versions', async () => {
+    const fetchFn = respond(200, [release('v0.3.0-rc.1', { prerelease: true }), release('v0.2.0')]);
+    expect(await checkForUpdate(199, { testVersions: true, fetchFn })).toMatchObject({ status: 'available', release: { version: '0.3.0-rc.1' } });
+    expect(fetchFn).toHaveBeenCalledWith(RELEASES_URL, expect.anything());
+    expect(RELEASES_URL).toBe('https://api.github.com/repos/leoeiji/edji/releases?per_page=20');
+  });
+
+  it('offers the final release over its candidate', async () => {
+    expect(await checkForUpdate(30001, { fetchFn: respond(200, release('v0.3.0')) })).toMatchObject({ status: 'available' });
+    expect(await checkForUpdate(30001, { testVersions: true, fetchFn: respond(200, [release('v0.3.0'), release('v0.3.0-rc.1')]) })).toMatchObject({
+      status: 'available',
+      release: { version: '0.3.0' },
+    });
+  });
+
   it('offers a newer version', async () => {
-    const result = await checkForUpdate(200, respond(200, release('v0.3.0')));
-    expect(result).toMatchObject({ status: 'available', release: { version: '0.3.0', versionCode: 300 } });
+    const result = await checkForUpdate(200, { fetchFn: respond(200, release('v0.3.0')) });
+    expect(result).toMatchObject({ status: 'available', release: { version: '0.3.0', versionCode: 30099 } });
   });
 
   it('is up to date on the same or an older version', async () => {
-    expect(await checkForUpdate(300, respond(200, release('v0.3.0')))).toEqual({ status: 'up-to-date', latest: '0.3.0' });
-    expect(await checkForUpdate(10000, respond(200, release('v0.3.0')))).toEqual({ status: 'up-to-date', latest: '0.3.0' });
+    expect(await checkForUpdate(30099, { fetchFn: respond(200, release('v0.3.0')) })).toEqual({ status: 'up-to-date', latest: '0.3.0' });
+    expect(await checkForUpdate(1000099, { fetchFn: respond(200, release('v0.3.0')) })).toEqual({ status: 'up-to-date', latest: '0.3.0' });
   });
 
   it('turns network and GitHub errors into short messages instead of throwing', async () => {
     const offline = jest.fn(async () => {
       throw new TypeError('Network request failed');
     });
-    expect(await checkForUpdate(200, offline)).toEqual({ status: 'error', message: 'Sem conexão com o GitHub. Confira a internet.' });
-    expect(await checkForUpdate(200, respond(403))).toEqual({ status: 'error', message: 'O GitHub limitou as consultas. Tente mais tarde.' });
-    expect(await checkForUpdate(200, respond(404))).toEqual({ status: 'error', message: 'Ainda não há versão publicada.' });
-    expect(await checkForUpdate(200, respond(502))).toMatchObject({ status: 'error' });
-    expect(await checkForUpdate(200, respond(200, release('v0.3.0', { assets: [] })))).toEqual({
+    expect(await checkForUpdate(200, { fetchFn: offline })).toEqual({ status: 'error', message: 'Sem conexão com o GitHub. Confira a internet.' });
+    expect(await checkForUpdate(200, { fetchFn: respond(403) })).toEqual({ status: 'error', message: 'O GitHub limitou as consultas. Tente mais tarde.' });
+    expect(await checkForUpdate(200, { fetchFn: respond(404) })).toEqual({ status: 'error', message: 'Ainda não há versão publicada.' });
+    expect(await checkForUpdate(200, { fetchFn: respond(502) })).toMatchObject({ status: 'error' });
+    expect(await checkForUpdate(200, { fetchFn: respond(200, release('v0.3.0', { assets: [] })) })).toEqual({
       status: 'error',
       message: 'A versão 0.3.0 não tem o APK.',
     });
@@ -164,6 +210,15 @@ describe('autoCheck', () => {
     await setAutoCheck(db, true);
     expect(await autoCheck(db, 200, now, respond(502))).toMatchObject({ status: 'error' });
     expect(await getSetting(db, LAST_CHECK_SETTING)).toBeNull();
+  });
+
+  it('follows the test versions opt-in, off by default', async () => {
+    await setAutoCheck(db, true);
+    expect(await isTestVersionsEnabled(db)).toBe(false);
+    await setTestVersions(db, true);
+    const fetchFn = respond(200, [release('v0.3.0-rc.1', { prerelease: true })]);
+    expect(await autoCheck(db, 199, now, fetchFn)).toMatchObject({ status: 'available', release: { version: '0.3.0-rc.1' } });
+    expect(fetchFn).toHaveBeenCalledWith(RELEASES_URL, expect.anything());
   });
 
   it('stops after the user turns it off', async () => {

@@ -3,6 +3,10 @@
 #   git tag v0.0.1 && git push origin v0.0.1
 # The tag must match "version" in app/package.json, the single source of the
 # app version (app.config.ts reads it). Bump it with `npm version X.Y.Z` in app/.
+# A release candidate (`npm version X.Y.Z-rc.N`, tag vX.Y.Z-rc.N) is published
+# as a prerelease: GitHub's "latest" skips it, so only apps with "Versões de
+# teste" on are offered it. It can be tagged on a PR branch to test on a device
+# before merging; the final release is tagged on main.
 #
 # The APK is signed with the Edji release key (secrets ANDROID_KEYSTORE_BASE64
 # and ANDROID_KEYSTORE_PASSWORD; the alias is not secret). The app updates itself from
@@ -29,13 +33,14 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: app
 
       # app.config.ts derives versionCode from this version and fails the build
-      # if it is not MAJOR.MINOR.PATCH with MINOR and PATCH up to 99.
+      # if it is not MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.N (ADR 0007).
       - name: Compare tag with package.json
         id: check
         working-directory: app
@@ -47,6 +52,10 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-rc.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
           echo "Version $version ✓"
 
   ci:
@@ -145,12 +154,24 @@ jobs:
         with:
           name: android-apk
 
+      # A candidate's notes start at the release before it, candidate or not. A
+      # final release's notes start at the previous final release, so they
+      # cover every change since then and not only those after its last candidate.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
+          args=()
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          else
+            previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-pre-releases --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')
+            if [ -n "$previous" ]; then args+=(--notes-start-tag "$previous"); fi
+          fi
           gh release create "$GITHUB_REF_NAME" "${{ needs.build-android.outputs.apk }}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Edji ${{ needs.version.outputs.version }}" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            "${args[@]}"

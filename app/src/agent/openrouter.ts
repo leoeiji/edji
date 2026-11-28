@@ -5,7 +5,10 @@ import { fetch as expoFetch } from 'expo/fetch';
 /**
  * OpenRouter chat model. Uses Expo's fetch, which streams response bodies
  * (React Native's fetch doesn't). No app name or URL headers: nothing about
- * the user or the app is sent beyond the conversation itself.
+ * the user or the app is sent beyond the conversation itself. Usage
+ * accounting is asked for explicitly, so the last chunk carries the cost and
+ * the upstream provider for the usage metrics (ADR 0008); it is part of the
+ * same response, not another request.
  */
 export function openRouterModel(apiKey: string, model: string): LanguageModel {
   const provider = createOpenRouter({
@@ -13,5 +16,5 @@ export function openRouterModel(apiKey: string, model: string): LanguageModel {
     compatibility: 'strict',
     fetch: expoFetch as unknown as typeof globalThis.fetch,
   });
-  return provider.chat(model);
+  return provider.chat(model, { usage: { include: true } });
 }

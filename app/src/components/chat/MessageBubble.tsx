@@ -8,7 +8,10 @@ type Props =
   | { kind: 'thinking' }
   | { kind: 'stopped' };
 
-/** A chat bubble: the user's (pine, right), the reply (surface, left), an error, or a short state line. */
+/**
+ * A chat message: the user's in a bubble (pine, right); the reply as plain
+ * text across the whole width, with no bubble; an error; or a short state line.
+ */
 export function MessageBubble(props: Props) {
   const t = useTheme();
   if (props.kind === 'thinking' || props.kind === 'stopped') {
@@ -28,16 +31,16 @@ export function MessageBubble(props: Props) {
       </View>
     );
   }
-  const user = props.kind === 'user';
+  if (props.kind === 'text') {
+    return (
+      <Text selectable style={[styles.reply, { color: t.text }]}>
+        {props.text}
+      </Text>
+    );
+  }
   return (
-    <View
-      style={[
-        styles.bubble,
-        user ? styles.right : styles.left,
-        { backgroundColor: user ? t.userBubble : t.surface },
-      ]}
-    >
-      <Text selectable style={[styles.text, { color: user ? t.onUserBubble : t.text }]}>
+    <View style={[styles.bubble, styles.right, { backgroundColor: t.userBubble }]}>
+      <Text selectable style={[styles.text, { color: t.onUserBubble }]}>
         {props.text}
       </Text>
     </View>
@@ -49,6 +52,7 @@ const styles = StyleSheet.create({
   left: { alignSelf: 'flex-start', borderBottomLeftRadius: 6 },
   right: { alignSelf: 'flex-end', borderBottomRightRadius: 6 },
   text: { fontSize: 16, lineHeight: 23 },
+  reply: { fontSize: 16, lineHeight: 24, paddingHorizontal: 2, paddingVertical: 2 },
   note: { fontSize: 14, paddingHorizontal: 4 },
   button: { alignSelf: 'flex-start', borderWidth: 1.5, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 6 },
 });

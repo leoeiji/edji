@@ -9,6 +9,7 @@ import type { LiveTurn } from '@/core/chatView';
 import { getDb } from '@/core/db';
 import { onChanged } from '@/core/events';
 import { agentTools, ensureReady } from '@/core/runtime';
+import { USAGE_TOPIC, conversationSteps, type UsageStep } from '@/core/usage';
 
 /**
  * One conversation of the text chat. `conversationId` null is a new chat:
@@ -18,6 +19,7 @@ import { agentTools, ensureReady } from '@/core/runtime';
  */
 export function useChat(conversationId: number | null, onCreated: (id: number) => void) {
   const [messages, setMessages] = useState<StoredMessage[]>([]);
+  const [steps, setSteps] = useState<UsageStep[]>([]);
   const [live, setLive] = useState<(LiveTurn & { conversationId: number }) | null>(null);
   const controller = useRef<AbortController | null>(null);
   const shown = useRef(conversationId);
@@ -33,14 +35,31 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
     if (shown.current === id) setMessages(loaded);
   }, []);
 
+  const reloadSteps = useCallback(async () => {
+    const id = shown.current;
+    if (id === null) return setSteps([]);
+    await ensureReady();
+    const loaded = await conversationSteps(await getDb(), id);
+    if (shown.current === id) setSteps(loaded);
+  }, []);
+
   useEffect(() => {
     setMessages([]);
+    setSteps([]);
     reload();
-    // A voice turn of this conversation may land while it is open.
-    return onChanged(CHAT_TOPIC, () => {
+    reloadSteps();
+    // A voice turn of this conversation may land while it is open; usage lands step by step.
+    const offChat = onChanged(CHAT_TOPIC, () => {
       reload();
     });
-  }, [conversationId, reload]);
+    const offUsage = onChanged(USAGE_TOPIC, () => {
+      reloadSteps();
+    });
+    return () => {
+      offChat();
+      offUsage();
+    };
+  }, [conversationId, reload, reloadSteps]);
 
   const send = useCallback(
     async (text: string) => {
@@ -91,6 +110,7 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
 
   return {
     messages,
+    steps,
     live: live && live.conversationId === conversationId ? live : null,
     busy: live !== null,
     send,

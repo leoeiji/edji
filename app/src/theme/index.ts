@@ -43,6 +43,10 @@ export type Theme = {
   /** Tool cards in the chat, and the background of a failed one or an error reply. */
   toolBg: string;
   dangerBg: string;
+  /** Token charts: input sent fresh, input read from the provider's cache, and output. */
+  usageIn: string;
+  usageCache: string;
+  usageOut: string;
 };
 
 const light: Theme = {
@@ -72,6 +76,9 @@ const light: Theme = {
   onUserBubble: brand.paper,
   toolBg: '#EFF3ED',
   dangerBg: '#FBE6E2',
+  usageIn: brand.pine,
+  usageCache: '#A9C7B6',
+  usageOut: '#3FA66B',
 };
 
 const dark: Theme = {
@@ -100,6 +107,9 @@ const dark: Theme = {
   onUserBubble: '#F0F8F0',
   toolBg: '#132019',
   dangerBg: '#3D1A17',
+  usageIn: brand.mint,
+  usageCache: '#2B4A38',
+  usageOut: '#2E8B57',
 };
 
 export function useTheme(): Theme {

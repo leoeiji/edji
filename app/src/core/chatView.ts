@@ -1,5 +1,6 @@
 import type { AssistantPart, ToolPart } from '@/agent/agent';
 import type { Conversation, MessageStatus, StoredMessage } from './chatStore';
+import type { UsageSummary } from './usage';
 
 /**
  * One row of the chat list. A reply is split into rows: each text part is a
@@ -12,7 +13,8 @@ export type ChatRow =
   | { kind: 'tool'; key: string; tool: ToolPart }
   | { kind: 'error'; key: string; text: string; setup: boolean }
   | { kind: 'thinking'; key: string }
-  | { kind: 'stopped'; key: string };
+  | { kind: 'stopped'; key: string }
+  | { kind: 'usage'; key: string; messageId: number; usage: UsageSummary };
 
 /**
  * The turn streaming now, as the screen shows it. The turn is stored as it
@@ -21,8 +23,11 @@ export type ChatRow =
  */
 export type LiveTurn = { userText: string; parts: AssistantPart[]; fromMessageId?: number };
 
-/** Rows oldest first; the screen's inverted list reverses them. */
-export function chatRows(messages: StoredMessage[], live: LiveTurn | null): ChatRow[] {
+/**
+ * Rows oldest first; the screen's inverted list reverses them. A finished
+ * reply with counted tokens in [usage] (by message id) ends with its usage line.
+ */
+export function chatRows(messages: StoredMessage[], live: LiveTurn | null, usage: Map<number, UsageSummary> = new Map()): ChatRow[] {
   const rows: ChatRow[] = [];
   const cut = live?.fromMessageId;
   for (const m of messages) {
@@ -31,6 +36,8 @@ export function chatRows(messages: StoredMessage[], live: LiveTurn | null): Chat
       rows.push({ kind: 'user', key: `m${m.id}`, text: partsText(m.parts) });
     } else {
       rows.push(...replyRows(`m${m.id}`, m.parts, m.status));
+      const u = usage.get(m.id);
+      if (u && u.totalTokens > 0 && m.status !== 'streaming') rows.push({ kind: 'usage', key: `m${m.id}-usage`, messageId: m.id, usage: u });
     }
   }
   if (live) {

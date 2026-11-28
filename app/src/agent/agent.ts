@@ -1,5 +1,6 @@
 import { APICallError, isStepCount, jsonSchema, streamText, tool, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import type { ParameterSchema, ToolResult } from '@/core/plugin';
+import { failedStepMetrics, stepMetrics, type StepMetrics } from './metrics';
 import type { ModelSettings } from './settings';
 
 /** A tool call as the chat shows and stores it. `name` is the plugin's `<pluginId>.<action>`. */
@@ -74,6 +75,8 @@ export type AgentInput = {
   tools?: AgentTool[];
   /** Replaces [INSTRUCTIONS]: [CHAT_INSTRUCTIONS] in the app, [ROUTINE_INSTRUCTIONS] for routines. */
   instructions?: string;
+  /** Called with the metrics of each model step as it ends, failed steps included (ADR 0008). */
+  onStep?(metrics: StepMetrics): void;
 };
 
 /** System instructions, in the brandbook tone: short, direct Portuguese for a small screen. */
@@ -135,6 +138,7 @@ export async function runAgent({
   createModel,
   tools,
   instructions,
+  onStep,
 }: AgentInput): Promise<AgentResult> {
   // Checked before anything leaves the device: no key, no network call.
   if (!settings.apiKey) return { status: 'setup', reply: MESSAGES.noKey };
@@ -154,6 +158,7 @@ export async function runAgent({
       abortSignal: signal,
       maxRetries: 1,
       onError: () => {}, // errors are read from fullStream below; the default logs to console.error
+      ...stepCallbacks(onStep),
     });
     for await (const part of result.fullStream) {
       if (part.type === 'text-delta') {
@@ -190,6 +195,35 @@ export async function runAgent({
   if (streamError) return describeError(streamError);
   const reply = text.trim();
   return reply ? { status: 'done', reply } : { status: 'failed', reply: MESSAGES.empty };
+}
+
+/**
+ * `onStepEnd` and `onStepError` for [onStep]. A metrics bug must never break
+ * a reply, so both swallow their own errors. A failed step stores our short
+ * message, never the provider's text, which could echo the request.
+ */
+export function stepCallbacks(onStep: ((metrics: StepMetrics) => void) | undefined) {
+  if (!onStep) return {};
+  let startedAt = Date.now();
+  return {
+    onStepStart: () => {
+      startedAt = Date.now();
+    },
+    onStepEnd: (step: Parameters<typeof stepMetrics>[0]) => {
+      try {
+        onStep(stepMetrics(step));
+      } catch {
+        // Metrics are best effort.
+      }
+    },
+    onStepError: (event: { callId: string; stepNumber: number; provider: string; modelId: string; error: unknown }) => {
+      try {
+        onStep(failedStepMetrics(event, describeError(event.error).reply, Date.now() - startedAt));
+      } catch {
+        // Metrics are best effort.
+      }
+    },
+  };
 }
 
 /** The name the model sees for a plugin tool: `routines.create` → `routines__create`. */
