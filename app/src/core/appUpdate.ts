@@ -11,12 +11,16 @@ import { versionCode } from './version';
 
 /** Latest published release; GitHub leaves drafts and prereleases out of it. */
 export const LATEST_RELEASE_URL = 'https://api.github.com/repos/leoeiji/edji/releases/latest';
+/** Recent releases, release candidates (prereleases) included, newest first; for the test versions opt-in. */
+export const RELEASES_URL = 'https://api.github.com/repos/leoeiji/edji/releases?per_page=20';
 
 /** "1" when the user turned on the automatic check. Off by default (no network without opt-in). */
 export const AUTO_CHECK_SETTING = 'update.auto_check';
 /** Epoch ms of the last automatic check that got an answer. */
 export const LAST_CHECK_SETTING = 'update.last_check_at';
 export const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** "1" when the user wants release candidates too. Off by default: they are for testing on the device. */
+export const TEST_VERSIONS_SETTING = 'update.test_versions';
 
 /** How many changes of a release the app shows. */
 const MAX_NOTES = 8;
@@ -51,15 +55,23 @@ export function canAct(phase: UpdatePhase): boolean {
 
 type FetchFn = (url: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
+type CheckOptions = {
+  /** Release candidates count too (`TEST_VERSIONS_SETTING`). */
+  testVersions?: boolean;
+  fetchFn?: FetchFn;
+};
+
 /**
  * Asks GitHub for the latest release and compares it with [installedCode].
+ * With [testVersions], the newest of the recent releases, release candidates
+ * included; without, GitHub's latest, which never is a release candidate.
  * Never throws: network and format problems come back as `error` with a
  * short Portuguese message.
  */
-export async function checkForUpdate(installedCode: number, fetchFn: FetchFn = fetch): Promise<UpdateCheck> {
+export async function checkForUpdate(installedCode: number, { testVersions = false, fetchFn = fetch }: CheckOptions = {}): Promise<UpdateCheck> {
   let body: unknown;
   try {
-    const res = await fetchFn(LATEST_RELEASE_URL, { headers: { Accept: 'application/vnd.github+json' } });
+    const res = await fetchFn(testVersions ? RELEASES_URL : LATEST_RELEASE_URL, { headers: { Accept: 'application/vnd.github+json' } });
     if (res.status === 403 || res.status === 429) return { status: 'error', message: 'O GitHub limitou as consultas. Tente mais tarde.' };
     if (res.status === 404) return { status: 'error', message: 'Ainda não há versão publicada.' };
     if (!res.ok) return { status: 'error', message: `O GitHub respondeu com erro ${res.status}. Tente mais tarde.` };
@@ -67,7 +79,7 @@ export async function checkForUpdate(installedCode: number, fetchFn: FetchFn = f
   } catch {
     return { status: 'error', message: 'Sem conexão com o GitHub. Confira a internet.' };
   }
-  const release = parseRelease(body);
+  const release = testVersions ? newestRelease(body) : parseRelease(body);
   if (typeof release === 'string') return { status: 'error', message: release };
   if (release.versionCode <= installedCode) return { status: 'up-to-date', latest: release.version };
   return { status: 'available', release };
@@ -103,6 +115,20 @@ export function parseRelease(json: unknown): Release | string {
 }
 
 /**
+ * The highest version among a GitHub list of releases, release candidates
+ * included, skipping drafts and releases the app can't use; or why none fits.
+ */
+export function newestRelease(json: unknown): Release | string {
+  if (!Array.isArray(json)) return 'Resposta inesperada do GitHub.';
+  const published = json.filter((r) => !(isRecord(r) && r.draft === true));
+  if (published.length === 0) return 'Ainda não há versão publicada.';
+  const parsed = published.map(parseRelease);
+  const usable = parsed.filter((r): r is Release => typeof r !== 'string');
+  if (usable.length === 0) return parsed[0] as string;
+  return usable.reduce((a, b) => (b.versionCode > a.versionCode ? b : a));
+}
+
+/**
  * The change lines of GitHub's auto-generated notes, without the author and
  * PR link ("* Add X by @user in https://…/pull/7" → "Add X").
  */
@@ -130,6 +156,14 @@ export async function setAutoCheck(db: SQLiteDatabase, enabled: boolean): Promis
   await setSetting(db, AUTO_CHECK_SETTING, enabled ? '1' : '0');
 }
 
+export async function isTestVersionsEnabled(db: SQLiteDatabase): Promise<boolean> {
+  return (await getSetting(db, TEST_VERSIONS_SETTING)) === '1';
+}
+
+export async function setTestVersions(db: SQLiteDatabase, enabled: boolean): Promise<void> {
+  await setSetting(db, TEST_VERSIONS_SETTING, enabled ? '1' : '0');
+}
+
 /**
  * The automatic check on app start: null without the opt-in or when it
  * already got an answer in the last day. A failed request doesn't count, so
@@ -138,7 +172,7 @@ export async function setAutoCheck(db: SQLiteDatabase, enabled: boolean): Promis
 export async function autoCheck(db: SQLiteDatabase, installedCode: number, now: number, fetchFn: FetchFn = fetch): Promise<UpdateCheck | null> {
   const last = await getSetting(db, LAST_CHECK_SETTING);
   if (!autoCheckDue(await isAutoCheckEnabled(db), last === null ? null : Number(last), now)) return null;
-  const result = await checkForUpdate(installedCode, fetchFn);
+  const result = await checkForUpdate(installedCode, { testVersions: await isTestVersionsEnabled(db), fetchFn });
   if (result.status !== 'error') await setSetting(db, LAST_CHECK_SETTING, String(now));
   return result;
 }

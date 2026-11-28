@@ -2,17 +2,26 @@ import { withAppBuildGradle, type ConfigPlugin } from 'expo/config-plugins';
 import type { ExpoConfig } from 'expo/config';
 import { version } from './package.json';
 
+const MAX_RC = 98;
+/** The last digits of a final release, above any of its candidates. */
+const FINAL = 99;
+
 /**
- * Android versionCode from a MAJOR.MINOR.PATCH version: MAJOR*10000 + MINOR*100 + PATCH,
- * so each release installs over the previous one. MINOR and PATCH go up to 99.
+ * Android versionCode from MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.N (ADR 0007):
+ * MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 + N, with 99 for the final release,
+ * so each release candidate installs over the one before and the final over its
+ * candidates. MINOR and PATCH go up to 99, N from 1 to 98.
  * The app has a copy in `src/core/version.ts` (Expo's config loader can't import
  * local TypeScript); `__tests__/app.config.test.ts` keeps both in agreement.
  */
 export function versionCode(semver: string): number {
-  const match = /^(\d+)\.(\d{1,2})\.(\d{1,2})$/.exec(semver);
-  if (!match) throw new Error(`Version "${semver}" must be MAJOR.MINOR.PATCH, with MINOR and PATCH up to 99`);
-  const [major, minor, patch] = match.slice(1).map(Number);
-  return major * 10000 + minor * 100 + patch;
+  const match = /^(\d+)\.(\d{1,2})\.(\d{1,2})(?:-rc\.([1-9]\d?))?$/.exec(semver);
+  const candidate = match?.[4] === undefined ? null : Number(match[4]);
+  if (!match || (candidate !== null && candidate > MAX_RC)) {
+    throw new Error(`Version "${semver}" must be MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.N, with MINOR and PATCH up to 99 and N up to ${MAX_RC}`);
+  }
+  const [major, minor, patch] = match.slice(1, 4).map(Number);
+  return major * 1_000_000 + minor * 10_000 + patch * 100 + (candidate ?? FINAL);
 }
 
 /**

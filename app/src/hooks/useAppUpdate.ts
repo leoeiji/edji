@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { EdjiAssistant, type UpdateEvent } from '../../modules/edji-assistant';
-import { autoCheck, checkForUpdate, isAutoCheckEnabled, setAutoCheck, type UpdateCheck, type UpdatePhase } from '@/core/appUpdate';
+import {
+  autoCheck,
+  checkForUpdate,
+  isAutoCheckEnabled,
+  isTestVersionsEnabled,
+  setAutoCheck,
+  setTestVersions,
+  type UpdateCheck,
+  type UpdatePhase,
+} from '@/core/appUpdate';
 import { getDb } from '@/core/db';
 import { requestPermission } from '@/core/devicePermissions';
 import { ensureReady } from '@/core/runtime';
@@ -18,8 +27,11 @@ export type AppUpdate = {
   message: string | null;
   /** The automatic daily check; null until read. */
   autoCheck: boolean | null;
+  /** Release candidates count as updates; null until read. */
+  testVersions: boolean | null;
   checkNow(): Promise<void>;
   setAuto(enabled: boolean): Promise<void>;
+  setTestVersions(enabled: boolean): Promise<void>;
   install(): Promise<void>;
 };
 
@@ -34,6 +46,7 @@ export function useAppUpdate(): AppUpdate {
   const [progress, setProgress] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [auto, setAutoState] = useState<boolean | null>(null);
+  const [testVersions, setTestState] = useState<boolean | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -41,8 +54,10 @@ export function useAppUpdate(): AppUpdate {
       await ensureReady();
       const db = await getDb();
       const enabled = await isAutoCheckEnabled(db);
+      const tests = await isTestVersionsEnabled(db);
       if (!active) return;
       setAutoState(enabled);
+      setTestState(tests);
       if (!installed) return;
       const result = await autoCheck(db, installed.versionCode, Date.now());
       if (active && result) setCheck(result);
@@ -87,13 +102,20 @@ export function useAppUpdate(): AppUpdate {
     if (!installed) return;
     setPhase('checking');
     setMessage(null);
-    setCheck(await checkForUpdate(installed.versionCode));
+    setCheck(await checkForUpdate(installed.versionCode, { testVersions: await isTestVersionsEnabled(await getDb()) }));
     setPhase('idle');
   }, [installed]);
 
   const setAuto = useCallback(async (enabled: boolean) => {
     setAutoState(enabled);
     await setAutoCheck(await getDb(), enabled);
+  }, []);
+
+  const setTests = useCallback(async (enabled: boolean) => {
+    setTestState(enabled);
+    // The last answer came from the other channel.
+    setCheck(null);
+    await setTestVersions(await getDb(), enabled);
   }, []);
 
   const install = useCallback(async () => {
@@ -115,5 +137,5 @@ export function useAppUpdate(): AppUpdate {
     }
   }, [check]);
 
-  return { installed, check, phase, progress, message, autoCheck: auto, checkNow, setAuto, install };
+  return { installed, check, phase, progress, message, autoCheck: auto, testVersions, checkNow, setAuto, setTestVersions: setTests, install };
 }

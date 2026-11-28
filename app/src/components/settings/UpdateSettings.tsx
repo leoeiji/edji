@@ -69,6 +69,19 @@ export function UpdateSettings({ update }: Props) {
                 accessibilityLabel="Procurar atualizações sozinho"
               />
             </View>
+            <View style={styles.pluginRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.label, { color: t.text }]}>Versões de teste</Text>
+                <Text style={[styles.meta, { color: t.muted }]}>Recebe também as candidatas (rc) antes da versão final.</Text>
+              </View>
+              <Switch
+                value={update.testVersions ?? false}
+                disabled={update.testVersions === null || !free}
+                onValueChange={update.setTestVersions}
+                trackColor={{ true: t.accent }}
+                accessibilityLabel="Receber versões de teste"
+              />
+            </View>
             <Text style={[styles.hint, { color: t.muted }]}>
               Procurar consulta o GitHub, que vê o seu IP. Nada do Edji é enviado. O Android pede para confirmar a instalação.
             </Text>
