@@ -21,16 +21,34 @@ class EdjiAssistantModule : Module() {
 
     private val logListener: (String) -> Unit = { line -> sendEvent("onLog", mapOf("line" to line)) }
 
+    private val updateListener: (AppUpdater.Event) -> Unit = { e ->
+        sendEvent(
+            "onUpdate",
+            mapOf("state" to e.state, "downloaded" to e.downloaded.toDouble(), "total" to e.total.toDouble(), "message" to e.message),
+        )
+    }
+
     override fun definition() = ModuleDefinition {
         Name("EdjiAssistant")
 
-        Events("onLog")
+        Events("onLog", "onUpdate")
 
-        // Re-registers routine triggers on every app start, not only at boot.
-        OnCreate { appContext.reactContext?.applicationContext?.let { ctx -> RoutineEngine.post { RoutineEngine.sync(ctx) } } }
+        // Re-registers routine triggers on every app start, not only at boot, and drops the APK of a finished update.
+        OnCreate {
+            appContext.reactContext?.applicationContext?.let { ctx ->
+                RoutineEngine.post { RoutineEngine.sync(ctx) }
+                AppUpdater.cleanUp(ctx)
+            }
+        }
 
-        OnStartObserving { AssistantLog.addListener(logListener) }
-        OnStopObserving { AssistantLog.removeListener(logListener) }
+        OnStartObserving {
+            AssistantLog.addListener(logListener)
+            AppUpdater.addListener(updateListener)
+        }
+        OnStopObserving {
+            AssistantLog.removeListener(logListener)
+            AppUpdater.removeListener(updateListener)
+        }
 
         /** Pending voice commands, oldest first, each with the earlier turns of its session. */
         AsyncFunction("pendingCommands") {
@@ -100,6 +118,22 @@ class EdjiAssistantModule : Module() {
 
         Function("isAssistant") {
             context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+        }
+
+        // In-app update (ADR 0007)
+
+        Function("installedVersion") { AppUpdater.installedVersion(context) }
+
+        Function("canInstallUpdates") { AppUpdater.canInstall(context) }
+
+        /**
+         * Downloads the release APK, checks digest, package, version and key,
+         * and opens the system installer. Resolves null once the installer has
+         * it, or with a short Portuguese reason; progress and outcome come as
+         * `onUpdate` events.
+         */
+        AsyncFunction("installUpdate") { url: String, sha256: String, size: Double, promise: Promise ->
+            AppUpdater.update(context, url, sha256, size.toLong()) { problem -> promise.resolve(problem) }
         }
 
         // Routines (ADR 0005)

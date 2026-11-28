@@ -47,7 +47,31 @@ type EdjiAssistantNative = {
   isAssistant(): boolean;
   openAssistantSettings(): void;
   addListener(event: 'onLog', listener: (e: { line: string }) => void): EventSubscription;
-} & RoutinesNative;
+  addListener(event: 'onUpdate', listener: (e: UpdateEvent) => void): EventSubscription;
+} & RoutinesNative &
+  UpdateNative;
+
+/** Progress and outcome of an in-app update (ADR 0007). `message` is short Portuguese, on `failed`. */
+export type UpdateEvent = {
+  state: 'downloading' | 'waiting_user' | 'installed' | 'cancelled' | 'failed';
+  downloaded: number;
+  total: number;
+  message: string | null;
+};
+
+/** In-app update from GitHub Releases (ADR 0007). JS finds the release; native downloads, checks and installs. */
+type UpdateNative = {
+  installedVersion(): { versionName: string; versionCode: number };
+  /** Whether the user let Edji install apps ("Instalar apps desconhecidos"). */
+  canInstallUpdates(): boolean;
+  /**
+   * Downloads the APK, checks it against [sha256] and [size] and against the
+   * installed app (package, newer version, same key), and opens the system
+   * installer. Resolves null once the installer has it, else a short Portuguese
+   * reason. Progress and outcome arrive as `onUpdate` events.
+   */
+  installUpdate(url: string, sha256: string, size: number): Promise<string | null>;
+};
 
 /**
  * Routines and permissions bridge (ADR 0005). Routines live in

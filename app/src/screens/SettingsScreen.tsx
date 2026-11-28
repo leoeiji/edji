@@ -3,16 +3,18 @@ import { ConversationSettings } from '@/components/settings/ConversationSettings
 import { ModelSettings } from '@/components/settings/ModelSettings';
 import { RoutinesSettings } from '@/components/settings/RoutinesSettings';
 import { settingsStyles as styles } from '@/components/settings/styles';
+import { UpdateSettings } from '@/components/settings/UpdateSettings';
 import { getDb, setPluginEnabled } from '@/core/db';
+import type { AppUpdate } from '@/hooks/useAppUpdate';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import type { Plugin } from '@/core/plugin';
 import { isEnabled, type PluginStates } from '@/core/registry';
 import { useTheme } from '@/theme';
 
-type Props = { plugins: Plugin[]; states: PluginStates; onStatesChanged(): void };
+type Props = { plugins: Plugin[]; states: PluginStates; onStatesChanged(): void; update: AppUpdate };
 
-/** Model provider (key, model, light model), conversations, the routines opt-in and plugin switches. Device permissions live in `PermissionsScreen`. */
-export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
+/** Model provider (key, model, light model), conversations, the routines opt-in, plugin switches and updates. Device permissions live in `PermissionsScreen`. */
+export function SettingsScreen({ plugins, states, onStatesChanged, update }: Props) {
   const t = useTheme();
   const keyboard = useKeyboardInset();
   const toggle = async (p: Plugin, value: boolean) => {
@@ -50,6 +52,8 @@ export function SettingsScreen({ plugins, states, onStatesChanged }: Props) {
           </View>
         </>
       )}
+
+      <UpdateSettings update={update} />
     </ScrollView>
   );
 }

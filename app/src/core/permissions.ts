@@ -14,7 +14,8 @@ export type PermissionId =
   | 'notification_access'
   | 'dnd_access'
   | 'background_launch'
-  | 'battery_unrestricted';
+  | 'battery_unrestricted'
+  | 'install_updates';
 
 /**
  * `runtime`: granted in a system dialog shown over the app.
@@ -84,6 +85,13 @@ export const PERMISSIONS: Permission[] = [
     kind: 'special',
     group: 'reliability',
     recommended: true,
+  },
+  {
+    id: 'install_updates',
+    label: 'Instalar atualizações',
+    reason: 'Atualizar o Edji pelo próprio app.',
+    kind: 'special',
+    group: 'reliability',
   },
 ];
 

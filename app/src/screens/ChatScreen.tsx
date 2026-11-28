@@ -3,7 +3,9 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { Composer } from '@/components/chat/Composer';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ToolCard } from '@/components/chat/ToolCard';
+import { UpdateBanner } from '@/components/chat/UpdateBanner';
 import { chatRows, type ChatRow } from '@/core/chatView';
+import type { AppUpdate } from '@/hooks/useAppUpdate';
 import { useChat } from '@/hooks/useChat';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { useTheme } from '@/theme';
@@ -12,10 +14,11 @@ type Props = {
   conversationId: number | null;
   onCreated(id: number): void;
   onOpenSettings(): void;
+  update: AppUpdate;
 };
 
-/** The home screen: a text chat with the agent, tool calls shown as cards. */
-export function ChatScreen({ conversationId, onCreated, onOpenSettings }: Props) {
+/** The home screen: a text chat with the agent, tool calls shown as cards, and a banner when an update is out. */
+export function ChatScreen({ conversationId, onCreated, onOpenSettings, update }: Props) {
   const t = useTheme();
   const { messages, live, busy, send, stop } = useChat(conversationId, onCreated);
   const keyboard = useKeyboardInset();
@@ -41,6 +44,7 @@ export function ChatScreen({ conversationId, onCreated, onOpenSettings }: Props)
 
   return (
     <View style={[styles.root, { paddingBottom: keyboard }]}>
+      <UpdateBanner update={update} />
       {rows.length === 0 ? (
         <View style={styles.empty}>
           <Text style={[styles.emptyTitle, { color: t.text }]}>O que você precisa?</Text>
