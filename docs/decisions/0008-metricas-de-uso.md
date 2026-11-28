@@ -13,7 +13,7 @@ O agente manda o histórico e os tools a cada pedido, e não havia como ver quan
 - **Guardar só os totais por mensagem:** menos linhas, mas perde o passo a passo das tools e não serve a análises novas sem migrar.
 - **Guardar nas partes do chat (`chat_parts`):** deixaria de fora voz sem conversa, rotinas e títulos, e apagar a conversa apagaria o uso.
 - **Plugin dono da tabela:** desligar o plugin pararia a contagem; o uso precisa ser contado pelo núcleo, que é quem chama o modelo.
-- **Pedir o custo à API de gerações do OpenRouter depois:** uma chamada de rede a mais por resposta; o custo já vem no stream (`compatibility: 'strict'` liga `include_usage`).
+- **Pedir o custo à API de gerações do OpenRouter depois:** uma chamada de rede a mais por resposta. Em vez disso, o modelo é criado com `usage: { include: true }` (contabilidade de uso do OpenRouter), que pede o custo e o provedor no último bloco da mesma resposta. Que eles chegam de fato pelo `expo/fetch` ainda precisa ser conferido em aparelho.
 
 ## Decisão
 
