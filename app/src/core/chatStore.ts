@@ -1,5 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import type { AssistantPart, ChatMessage, ToolPart } from '@/agent/agent';
+import type { AttachmentPart, ModelAttachment } from '@/agent/attachments';
+import { removeFiles } from './attachmentFiles';
 import { emitChanged } from './events';
 import type { Migration } from './plugin';
 
@@ -51,7 +53,21 @@ export const CHAT_MIGRATIONS: Migration[] = [
       CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `,
   },
+  {
+    // Attachments (ADR 0009): a part of type `attachment` points at a file of the app.
+    version: 2,
+    sql: `
+      ALTER TABLE chat_parts ADD COLUMN att_kind TEXT;
+      ALTER TABLE chat_parts ADD COLUMN att_uri TEXT;
+      ALTER TABLE chat_parts ADD COLUMN att_name TEXT;
+      ALTER TABLE chat_parts ADD COLUMN att_mime TEXT;
+      ALTER TABLE chat_parts ADD COLUMN att_size INTEGER;
+    `,
+  },
 ];
+
+/** A stored part: what the assistant says and does, or a file the user attached. */
+export type ChatPart = AssistantPart | AttachmentPart;
 
 export type ConversationOrigin = 'app' | 'voice';
 
@@ -80,7 +96,7 @@ export type StoredMessage = {
   role: 'user' | 'assistant';
   status: MessageStatus;
   createdAt: number;
-  parts: AssistantPart[];
+  parts: ChatPart[];
 };
 
 type ConversationRow = {
@@ -161,20 +177,35 @@ export async function settleTitle(db: SQLiteDatabase, id: number, title: string 
 
 /** Deletes the conversation with its messages and tool calls. There is no undo. */
 export async function deleteConversation(db: SQLiteDatabase, id: number): Promise<void> {
+  const files = await attachmentUris(db, id);
   await db.runAsync('DELETE FROM chat_conversations WHERE id = ?', id);
+  await removeFiles(files);
   emitChanged(CHAT_TOPIC);
 }
 
 export async function deleteAllConversations(db: SQLiteDatabase): Promise<void> {
+  const files = await attachmentUris(db, null);
   await db.runAsync('DELETE FROM chat_conversations');
+  await removeFiles(files);
   emitChanged(CHAT_TOPIC);
+}
+
+/** The files attached in a conversation (or in all of them), to delete with it. */
+async function attachmentUris(db: SQLiteDatabase, conversationId: number | null): Promise<string[]> {
+  const rows = await db.getAllAsync<{ att_uri: string }>(
+    `SELECT p.att_uri FROM chat_parts p JOIN chat_messages m ON m.id = p.message_id
+     WHERE p.type = 'attachment' AND p.att_uri IS NOT NULL AND (? IS NULL OR m.conversation_id = ?)`,
+    conversationId,
+    conversationId,
+  );
+  return rows.map((r) => r.att_uri);
 }
 
 /** Adds a message with its parts so far and moves the conversation to the top of the list. */
 export async function addMessage(
   db: SQLiteDatabase,
   conversationId: number,
-  { role, status, parts, now = Date.now() }: { role: 'user' | 'assistant'; status: MessageStatus; parts: AssistantPart[]; now?: number },
+  { role, status, parts, now = Date.now() }: { role: 'user' | 'assistant'; status: MessageStatus; parts: ChatPart[]; now?: number },
 ): Promise<number> {
   const r = await db.runAsync(
     'INSERT INTO chat_messages (conversation_id, role, status, created_at) VALUES (?, ?, ?, ?)',
@@ -190,11 +221,13 @@ export async function addMessage(
 }
 
 /** Writes part [seq] of a message, replacing what was there (a growing text, a tool that finished). */
-export async function savePart(db: SQLiteDatabase, messageId: number, seq: number, part: AssistantPart): Promise<void> {
+export async function savePart(db: SQLiteDatabase, messageId: number, seq: number, part: ChatPart): Promise<void> {
   const tool = part.type === 'tool' ? part : null;
+  const file = part.type === 'attachment' ? part : null;
   await db.runAsync(
-    `INSERT OR REPLACE INTO chat_parts (message_id, seq, type, text, tool_call_id, tool_name, input_json, output, state, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO chat_parts
+       (message_id, seq, type, text, tool_call_id, tool_name, input_json, output, state, duration_ms, att_kind, att_uri, att_name, att_mime, att_size)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     messageId,
     seq,
     part.type,
@@ -205,6 +238,11 @@ export async function savePart(db: SQLiteDatabase, messageId: number, seq: numbe
     tool?.output ?? null,
     tool?.state ?? null,
     tool?.durationMs ?? null,
+    file?.kind ?? null,
+    file?.uri ?? null,
+    file?.name ?? null,
+    file?.mime ?? null,
+    file?.size ?? null,
   );
 }
 
@@ -225,7 +263,7 @@ export async function closeInterruptedMessages(db: SQLiteDatabase): Promise<void
 
 type PartRow = {
   message_id: number;
-  type: 'text' | 'tool';
+  type: 'text' | 'tool' | 'attachment';
   text: string | null;
   tool_call_id: string | null;
   tool_name: string | null;
@@ -233,6 +271,11 @@ type PartRow = {
   output: string | null;
   state: ToolPart['state'] | null;
   duration_ms: number | null;
+  att_kind: 'image' | 'file' | null;
+  att_uri: string | null;
+  att_name: string | null;
+  att_mime: string | null;
+  att_size: number | null;
 };
 
 /** The messages of a conversation, oldest first, with their parts in order. */
@@ -246,7 +289,7 @@ export async function loadMessages(db: SQLiteDatabase, conversationId: number): 
      WHERE m.conversation_id = ? ORDER BY p.message_id, p.seq`,
     conversationId,
   );
-  const byMessage = new Map<number, AssistantPart[]>();
+  const byMessage = new Map<number, ChatPart[]>();
   for (const p of parts) {
     const list = byMessage.get(p.message_id) ?? [];
     list.push(toPart(p));
@@ -255,8 +298,11 @@ export async function loadMessages(db: SQLiteDatabase, conversationId: number): 
   return messages.map((m) => ({ id: m.id, role: m.role, status: m.status, createdAt: m.created_at, parts: byMessage.get(m.id) ?? [] }));
 }
 
-function toPart(p: PartRow): AssistantPart {
+function toPart(p: PartRow): ChatPart {
   if (p.type === 'text') return { type: 'text', text: p.text ?? '' };
+  if (p.type === 'attachment') {
+    return { type: 'attachment', kind: p.att_kind ?? 'file', uri: p.att_uri ?? '', name: p.att_name ?? 'arquivo', mime: p.att_mime ?? '', size: p.att_size ?? 0 };
+  }
   let input: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(p.input_json ?? '{}');
@@ -276,7 +322,7 @@ function toPart(p: PartRow): AssistantPart {
 }
 
 /** The visible text of a message: its text parts, joined. */
-export function messageText(parts: AssistantPart[]): string {
+export function messageText(parts: ChatPart[]): string {
   return parts
     .filter((p): p is Extract<AssistantPart, { type: 'text' }> => p.type === 'text')
     .map((p) => p.text)
@@ -284,19 +330,26 @@ export function messageText(parts: AssistantPart[]): string {
     .trim();
 }
 
+/** The attachments of a stored message, in order. */
+export function messageAttachments(parts: ChatPart[]): AttachmentPart[] {
+  return parts.filter((p): p is AttachmentPart => p.type === 'attachment');
+}
+
 /**
  * What goes back to the model. Our own error replies (`failed`, `setup`) and
  * a reply still streaming are left out; a cancelled one goes back with what
  * it had, tools included.
  */
-export function historyFor(messages: StoredMessage[]): ChatMessage[] {
+export function historyFor(messages: StoredMessage[], attachments: Map<number, ModelAttachment[]> = new Map()): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ role: 'user', content: messageText(m.parts) });
+      const loaded = attachments.get(m.id);
+      out.push({ role: 'user', content: messageText(m.parts), ...(loaded?.length ? { attachments: loaded } : {}) });
     } else if (m.status === 'done' || m.status === 'cancelled') {
-      if (m.parts.length === 0) continue;
-      out.push({ role: 'assistant', content: messageText(m.parts), parts: m.parts });
+      const parts = m.parts.filter((p): p is AssistantPart => p.type !== 'attachment');
+      if (parts.length === 0) continue;
+      out.push({ role: 'assistant', content: messageText(parts), parts });
     }
   }
   return out;

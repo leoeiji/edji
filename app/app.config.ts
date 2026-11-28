@@ -87,7 +87,13 @@ const config: ExpoConfig = {
   web: {
     favicon: './assets/favicon.png',
   },
-  plugins: ['expo-sqlite', 'expo-secure-store'],
+  plugins: [
+    'expo-sqlite',
+    'expo-secure-store',
+    // Camera for "Tirar foto" (ADR 0009); the gallery uses the system photo picker, which needs no permission.
+    // Never pass `microphonePermission: false` here: the plugin would then block RECORD_AUDIO, which the voice session needs.
+    ['expo-image-picker', { cameraPermission: 'O Edji usa a câmera para anexar fotos ao chat.' }],
+  ],
 };
 
 export default withReleaseSigning(config);

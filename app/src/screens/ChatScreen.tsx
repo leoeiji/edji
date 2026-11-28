@@ -10,6 +10,7 @@ import { UsageSheet } from '@/components/chat/UsageSheet';
 import { chatRows, type ChatRow } from '@/core/chatView';
 import { byMessage, summarize } from '@/core/usage';
 import type { AppUpdate } from '@/hooks/useAppUpdate';
+import { useAttachments } from '@/hooks/useAttachments';
 import { useChat } from '@/hooks/useChat';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { useTheme } from '@/theme';
@@ -29,6 +30,7 @@ type Props = {
 export function ChatScreen({ conversationId, onCreated, onOpenSettings, update }: Props) {
   const t = useTheme();
   const { messages, steps, live, busy, send, stop } = useChat(conversationId, onCreated);
+  const attachments = useAttachments();
   const keyboard = useKeyboardInset();
   const [detail, setDetail] = useState<number | null>(null);
   const stepsByMessage = useMemo(() => byMessage(steps), [steps]);
@@ -45,7 +47,7 @@ export function ChatScreen({ conversationId, onCreated, onOpenSettings, update }
   const render = ({ item }: { item: ChatRow }) => {
     switch (item.kind) {
       case 'user':
-        return <MessageBubble kind="user" text={item.text} />;
+        return <MessageBubble kind="user" text={item.text} attachments={item.attachments} />;
       case 'text':
         return <MessageBubble kind="text" text={item.text} />;
       case 'tool':
@@ -80,7 +82,7 @@ export function ChatScreen({ conversationId, onCreated, onOpenSettings, update }
           keyboardShouldPersistTaps="handled"
         />
       )}
-      <Composer busy={busy} onSend={send} onStop={stop} />
+      <Composer busy={busy} attachments={attachments} onSend={send} onStop={stop} onOpenSettings={onOpenSettings} />
       {detail !== null && stepsByMessage.get(detail) && (
         <UsageSheet steps={stepsByMessage.get(detail)!} toolNames={toolNames} onClose={() => setDetail(null)} />
       )}

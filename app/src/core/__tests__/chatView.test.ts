@@ -3,6 +3,22 @@ import { chatRows, formatDuration, groupConversations } from '../chatView';
 
 const user = (id: number, text: string): StoredMessage => ({ id, role: 'user', status: 'done', createdAt: 0, parts: [{ type: 'text', text }] });
 
+describe('chatRows with attachments', () => {
+  const photo = { type: 'attachment' as const, kind: 'image' as const, uri: 'file:///a/cupom.jpg', name: 'cupom.jpg', mime: 'image/jpeg', size: 1000 };
+
+  it('gives the user row its files, apart from the text', () => {
+    const message: StoredMessage = { id: 1, role: 'user', status: 'done', createdAt: 0, parts: [photo, { type: 'text', text: 'o que é isso?' }] };
+    const [row] = chatRows([message], null);
+    expect(row).toMatchObject({ kind: 'user', text: 'o que é isso?', attachments: [{ name: 'cupom.jpg', kind: 'image' }] });
+  });
+
+  it('shows the files of the live turn before its reply arrives', () => {
+    const { type: _type, ...file } = photo;
+    const rows = chatRows([], { userText: '', attachments: [file], parts: [] });
+    expect(rows[0]).toMatchObject({ kind: 'user', text: '', attachments: [{ name: 'cupom.jpg' }] });
+  });
+});
+
 describe('chatRows', () => {
   it('splits a reply into bubbles and tool cards, in order', () => {
     const rows = chatRows(

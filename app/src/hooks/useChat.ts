@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHAT_INSTRUCTIONS } from '@/agent/agent';
+import type { Attachment } from '@/agent/attachments';
 import { fallbackTitle } from '@/agent/light';
 import { openRouterModel } from '@/agent/openrouter';
 import { loadModelSettings } from '@/agent/settings';
+import { attachmentReader } from '@/core/attachmentFiles';
 import { CHAT_TOPIC, createConversation, getConversation, loadMessages, type StoredMessage } from '@/core/chatStore';
 import { runPersistedTurn, titleConversation } from '@/core/chatTurn';
 import type { LiveTurn } from '@/core/chatView';
@@ -62,27 +64,29 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
   }, [conversationId, reload, reloadSteps]);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: Attachment[] = []) => {
       const userText = text.trim();
-      if (!userText || controller.current) return;
+      if ((!userText && attachments.length === 0) || controller.current) return;
       await ensureReady();
       const db = await getDb();
       const conversation =
         (conversationId !== null ? await getConversation(db, conversationId) : null) ??
-        (await createConversation(db, { title: fallbackTitle(userText), origin: 'app' }));
+        (await createConversation(db, { title: fallbackTitle(userText || attachments[0]?.name || 'Anexo'), origin: 'app' }));
       if (conversation.id !== conversationId) onCreated(conversation.id);
 
       const abort = new AbortController();
       controller.current = abort;
       // Stored rows of this turn reload while it streams; until its id is known, hide anything newer than what is shown.
       let fromMessageId = conversation.id === conversationId ? lastShownId.current + 1 : 0;
-      setLive({ conversationId: conversation.id, userText, parts: [], fromMessageId });
+      setLive({ conversationId: conversation.id, userText, attachments, parts: [], fromMessageId });
       try {
         const settings = await loadModelSettings();
         const result = await runPersistedTurn({
           db,
           conversationId: conversation.id,
           userText,
+          attachments,
+          reader: attachmentReader,
           settings,
           createModel: openRouterModel,
           instructions: CHAT_INSTRUCTIONS,
@@ -92,12 +96,12 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
             fromMessageId = id;
             setLive((l) => (l ? { ...l, fromMessageId: id } : l));
           },
-          onParts: (parts) => setLive({ conversationId: conversation.id, userText, parts, fromMessageId }),
+          onParts: (parts) => setLive({ conversationId: conversation.id, userText, attachments, parts, fromMessageId }),
         });
         controller.current = null;
         if (shown.current === conversation.id) setMessages(await loadMessages(db, conversation.id));
         setLive(null);
-        await titleConversation(db, conversation, userText, result, { settings, createModel: openRouterModel });
+        await titleConversation(db, conversation, userText || attachments[0]?.name || 'Anexo', result, { settings, createModel: openRouterModel });
       } finally {
         controller.current = null;
         setLive(null);
