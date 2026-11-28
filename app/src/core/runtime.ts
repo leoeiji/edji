@@ -1,11 +1,15 @@
 import { EdjiAssistant, assistantLog, type AgentRoutineRun, type PendingCommand, type RoutineToolRun } from '../../modules/edji-assistant';
 import { PLUGINS } from '@/plugins';
-import { MESSAGES, ROUTINE_INSTRUCTIONS, runAgent, type AgentResult, type AgentTool, type ChatMessage } from '@/agent/agent';
+import { INSTRUCTIONS, MESSAGES, ROUTINE_INSTRUCTIONS, runAgent, type AgentResult, type AgentTool, type ChatMessage } from '@/agent/agent';
 import { applyMigrations, getDb, loadPluginStates, migratePlugins } from './db';
 import { fallbackTitle } from '@/agent/light';
 import { CHAT_MIGRATIONS, CHAT_SCHEMA_ID, createConversation, findVoiceConversation, savesVoiceConversations } from './chatStore';
 import { runPersistedTurn, titleConversation } from './chatTurn';
 import { emitChanged } from './events';
+import { catalogText, listSkills } from './skills/catalog';
+import { SKILLS_MIGRATIONS, SKILLS_SCHEMA_ID } from './skills/store';
+import { skillTools } from './skills/tools';
+import { skillDisplayName, type Skill } from './skills/types';
 import { USAGE_MIGRATIONS, USAGE_SCHEMA_ID, usageRecorder } from './usage';
 import { openRouterModel } from '@/agent/openrouter';
 import type { PluginContext, Tool } from './plugin';
@@ -21,6 +25,7 @@ export function ensureReady(): Promise<void> {
     const db = await getDb();
     await applyMigrations(db, CHAT_SCHEMA_ID, CHAT_MIGRATIONS);
     await applyMigrations(db, USAGE_SCHEMA_ID, USAGE_MIGRATIONS);
+    await applyMigrations(db, SKILLS_SCHEMA_ID, SKILLS_MIGRATIONS);
     await migratePlugins(db, PLUGINS);
   })();
   return ready;
@@ -35,24 +40,43 @@ export async function contextFor(pluginId: string): Promise<PluginContext> {
   };
 }
 
-/** Tools of the enabled plugins that pass [include], bound to their context, for the agent. */
+/**
+ * Tools of the enabled plugins that pass [include], bound to their context,
+ * for the agent, plus the core's `skills.*` tools (ADR 0010; plugin id
+ * `skills` for [include]). The routine filter drops the skill tools: they
+ * are not `routineAction`.
+ */
 export async function agentTools(include: (tool: Tool<any>, pluginId: string) => boolean = () => true): Promise<AgentTool[]> {
   const states = await loadPluginStates(await getDb());
   const plugins = enabledPlugins(PLUGINS, states);
-  const bound = await Promise.all(
-    plugins.map(async (p) => {
-      const ctx = await contextFor(p.id);
-      return (p.tools ?? []).filter((t) => include(t, p.id)).map(
-        (t): AgentTool => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-          execute: (params) => t.run(params, ctx),
-        }),
-      );
-    }),
-  );
+  const bind = async (pluginId: string, tools: Tool<any>[]) => {
+    const ctx = await contextFor(pluginId);
+    return tools.filter((t) => include(t, pluginId)).map(
+      (t): AgentTool => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+        execute: (params) => t.run(params, ctx),
+      }),
+    );
+  };
+  const bound = await Promise.all([...plugins.map((p) => bind(p.id, p.tools ?? [])), bind('skills', skillTools(PLUGINS))]);
   return bound.flat();
+}
+
+/** [base] followed by the skill catalog (ADR 0010), when there is any enabled skill. */
+export async function agentInstructions(base: string): Promise<string> {
+  const catalog = catalogText(await listSkills(await getDb(), PLUGINS));
+  return catalog ? `${base}\n\n${catalog}` : base;
+}
+
+/** How a tool call reads on the voice session's chip; skills are read as "Leu a skill X" with a book. */
+export function voiceChip(name: string, skills: Pick<Skill, 'id' | 'name'>[], input: Record<string, unknown>): { label: string; kind: 'tool' | 'skill' } {
+  if (name === 'skills.load') {
+    const id = typeof input.id === 'string' ? input.id : '';
+    return { label: `Leu a skill ${skillDisplayName(id, skills)}`, kind: 'skill' };
+  }
+  return { label: toolLabel(PLUGINS, name), kind: 'tool' };
 }
 
 let processing: Promise<number> | null = null;
@@ -115,12 +139,15 @@ async function answer(c: PendingCommand): Promise<Answer> {
   try {
     const db = await getDb();
     const settings = await loadModelSettings();
+    const skills = await listSkills(db, PLUGINS);
     const live = {
+      instructions: await agentInstructions(INSTRUCTIONS),
       signal: controller.signal,
       createModel: openRouterModel,
       tools: await agentTools(),
-      onToolEvent: (e: { id: string; name: string; state: 'running' | 'done' | 'failed' }) => {
-        if (!assistant.pushTool(c.id, e.id, toolLabel(PLUGINS, e.name), e.state)) controller.abort();
+      onToolEvent: (e: { id: string; name: string; input: Record<string, unknown>; state: 'running' | 'done' | 'failed' }) => {
+        const chip = voiceChip(e.name, skills, e.input);
+        if (!assistant.pushTool(c.id, e.id, chip.label, e.state, chip.kind)) controller.abort();
       },
       onText: (text: string) => {
         if (first) {

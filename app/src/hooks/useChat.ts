@@ -10,7 +10,7 @@ import { runPersistedTurn, titleConversation } from '@/core/chatTurn';
 import type { LiveTurn } from '@/core/chatView';
 import { getDb } from '@/core/db';
 import { onChanged } from '@/core/events';
-import { agentTools, ensureReady } from '@/core/runtime';
+import { agentInstructions, agentTools, ensureReady } from '@/core/runtime';
 import { USAGE_TOPIC, conversationSteps, type UsageStep } from '@/core/usage';
 
 /**
@@ -89,7 +89,7 @@ export function useChat(conversationId: number | null, onCreated: (id: number) =
           reader: attachmentReader,
           settings,
           createModel: openRouterModel,
-          instructions: CHAT_INSTRUCTIONS,
+          instructions: await agentInstructions(CHAT_INSTRUCTIONS),
           tools: await agentTools(),
           signal: abort.signal,
           onStored: (id) => {

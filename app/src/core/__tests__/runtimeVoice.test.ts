@@ -92,8 +92,8 @@ describe('voice commands with saving on', () => {
     mockNative.pendingCommands.mockResolvedValueOnce([voice(1, 'quanto gastei?')]).mockResolvedValueOnce([]);
     await processPendingCommands();
     expect(mockNative.pushTool.mock.calls.map((c) => (c as unknown[]).slice(1))).toEqual([
-      ['c1', 'Finanças · Resumo do mês', 'running'],
-      ['c1', 'Finanças · Resumo do mês', 'done'],
+      ['c1', 'Finanças · Resumo do mês', 'running', 'tool'],
+      ['c1', 'Finanças · Resumo do mês', 'done', 'tool'],
     ]);
   });
 });

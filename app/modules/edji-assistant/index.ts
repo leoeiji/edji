@@ -25,6 +25,9 @@ export type PendingCommand = { id: number; text: string; createdAt: number; sess
 /** Progress of a tool call, as the session's chip shows it. */
 export type ToolChipState = 'running' | 'done' | 'failed';
 
+/** `skill` draws the chip with a book mark: the agent read a skill (ADR 0010). */
+export type ToolChipKind = 'tool' | 'skill';
+
 /** How the agent finished a command, as the session shows it. */
 export type CommandStatus = 'done' | 'setup' | 'failed' | 'cancelled';
 
@@ -33,7 +36,7 @@ type EdjiAssistantNative = {
   /** Shows the reply so far in the session. Returns false once nobody is waiting (session closed). */
   pushReply(id: number, textSoFar: string): boolean;
   /** Shows a tool call as a chip in the session, with a ready-made Portuguese label. False once nobody is waiting. */
-  pushTool(id: number, toolCallId: string, label: string, state: ToolChipState): boolean;
+  pushTool(id: number, toolCallId: string, label: string, state: ToolChipState, kind?: ToolChipKind): boolean;
   /** Tells the session its turn was saved as a conversation, so it offers "Abrir no Edji". */
   markSaved(id: number): boolean;
   /** Whether the session still waits for this command. Doesn't extend its deadline. */

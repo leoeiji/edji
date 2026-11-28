@@ -1,6 +1,6 @@
 import type { AgentRoutineRun, PendingCommand, PendingRoutineRun, RoutineToolRun } from '../../../modules/edji-assistant';
 import { MESSAGES, ROUTINE_INSTRUCTIONS, runAgent } from '@/agent/agent';
-import { messagesFor, processPendingCommands, processPendingRoutineRuns, routineReport, WAITING_POLL_MS } from '../runtime';
+import { agentInstructions, agentTools, messagesFor, processPendingCommands, processPendingRoutineRuns, routineReport, voiceChip, WAITING_POLL_MS } from '../runtime';
 
 const mockDb: Record<string, jest.Mock> = {
   execAsync: jest.fn(),
@@ -189,5 +189,25 @@ describe('routineReport', () => {
   it('blocks when the key or model is missing and fails on other errors', () => {
     expect(routineReport({ reply: 'notify' }, { status: 'setup', reply: MESSAGES.noKey }).outcome).toBe('blocked');
     expect(routineReport({ reply: 'notify' }, { status: 'failed', reply: MESSAGES.noCredits }).outcome).toBe('failed');
+  });
+});
+
+describe('skills in the agent', () => {
+  it('appends the skill catalog to the instructions', async () => {
+    const text = await agentInstructions('Base.');
+    expect(text.startsWith('Base.\n\nSkills:')).toBe(true);
+    expect(text).toContain('system.write_skill');
+  });
+
+  it('offers the skill tools to chat and voice, never to routines', async () => {
+    expect((await agentTools()).map((t) => t.name)).toEqual(expect.arrayContaining(['skills.load', 'skills.create']));
+    expect((await agentTools((t) => t.routineAction === true)).map((t) => t.name).filter((n) => n.startsWith('skills.'))).toEqual([]);
+  });
+
+  it('shows a skill read as a book chip with the skill name', () => {
+    const skills = [{ id: 'user.mercado', name: 'Mercado' }];
+    expect(voiceChip('skills.load', skills, { id: 'user.mercado' })).toEqual({ label: 'Leu a skill Mercado', kind: 'skill' });
+    expect(voiceChip('skills.load', skills, { id: 'user.apagada' })).toEqual({ label: 'Leu a skill apagada', kind: 'skill' });
+    expect(voiceChip('skills.create', skills, {})).toEqual({ label: 'Skills · Criar skill', kind: 'tool' });
   });
 });

@@ -274,7 +274,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
                 onProgress = { text -> main.post { onReplyText(id, text) } },
                 onHeartbeat = { main.post { if (waitingId == id) armTimeout(id, STALL_TIMEOUT_MS) } },
                 onDone = { st, reply -> main.post { onReplyDone(id, st, reply) } },
-                onTool = { callId, label, toolState -> main.post { onTool(id, callId, label, toolState) } },
+                onTool = { callId, label, toolState, kind -> main.post { onTool(id, callId, label, toolState, kind) } },
                 onSaved = { main.post { if (waitingId == id) saved = true } },
             ),
         )
@@ -320,16 +320,27 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
     }
 
     /** Adds or updates the chip of a tool call, just above the reply bubble. */
-    private fun onTool(id: Long, toolCallId: String, label: String, toolState: String) {
+    private fun onTool(id: Long, toolCallId: String, label: String, toolState: String, kind: String) {
         if (waitingId != id) return
+        val skill = kind == "skill"
         val chip = chips[toolCallId] ?: addChip().also { chips[toolCallId] = it }
-        val mark = when (toolState) {
-            "running" -> "…"
-            "failed" -> "!"
-            else -> "✓"
+        val failed = toolState == "failed"
+        if (skill && !failed) {
+            // A skill read is a quiet "book + name" chip with no state mark (ADR 0010).
+            chip.text = label
+            chip.setTextColor(SKILL_TEXT)
+            chip.compoundDrawablePadding = px(7)
+            chip.setCompoundDrawablesRelativeWithIntrinsicBounds(BookDrawable(SKILL_TEXT, density), null, null, null)
+            (chip.background as? GradientDrawable)?.setColor(SKILL_BG)
+        } else {
+            val mark = when (toolState) {
+                "running" -> "…"
+                "failed" -> "!"
+                else -> "✓"
+            }
+            chip.text = "$mark  $label"
+            chip.setTextColor(if (failed) ERROR_TEXT else PINE)
         }
-        chip.text = "$mark  $label"
-        chip.setTextColor(if (toolState == "failed") ERROR_TEXT else PINE)
         chip.contentDescription = "$label, " + when (toolState) {
             "running" -> "rodando"
             "failed" -> "falhou"
@@ -547,5 +558,7 @@ class EdjiSession(context: Context) : VoiceInteractionSession(context), VoiceCap
         private val ERROR_BG = Color.parseColor("#FBEDEA")
         private val ERROR_LINE = Color.parseColor("#E7C4BD")
         private val ERROR_TEXT = Color.parseColor("#9A2A1F")
+        private val SKILL_TEXT = Color.parseColor("#0B6B45")
+        private val SKILL_BG = Color.parseColor("#E3F4E8")
     }
 }

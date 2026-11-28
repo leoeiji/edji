@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import type { PluginSkill } from './skills/types';
 
 /** What a plugin's tools and views receive. */
 export type PluginContext = {
@@ -51,6 +52,8 @@ export type Tool<P = Record<string, unknown>> = {
 /** A screen shown as an item of the app's side panel. */
 export type PluginView = {
   title: string;
+  /** `agent` puts the item inside the side panel's "Agente" group, after Skills. */
+  group?: 'agent';
   Component: ComponentType<{ ctx: PluginContext }>;
 };
 
@@ -67,6 +70,8 @@ export type Plugin = {
   version: string;
   enabledByDefault: boolean;
   tools?: Tool<any>[];
+  /** Skills the agent can load while this plugin is on (ADR 0010). Read-only for the user. */
+  skills?: PluginSkill[];
   view?: PluginView;
   migrations?: Migration[];
   /**

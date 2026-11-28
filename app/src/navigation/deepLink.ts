@@ -2,11 +2,13 @@
 export type DeepLink =
   | { kind: 'screen'; screen: string }
   | { kind: 'conversation'; id: number }
+  | { kind: 'skill'; id: string }
   | { kind: 'voiceConversation'; sessionId: string };
 
 /**
  * Reads an `edji://` link: `edji://<screen>`, `edji://chat/<id>` or
- * `edji://chat/voice/<sessionId>` (the voice session's "Abrir no Edji").
+ * `edji://chat/voice/<sessionId>` (the voice session's "Abrir no Edji") or
+ * `edji://skills/<skillId>` (the chat's "Abrir skill").
  * Anything else is null.
  */
 export function parseDeepLink(url: string | null | undefined): DeepLink | null {
@@ -14,6 +16,8 @@ export function parseDeepLink(url: string | null | undefined): DeepLink | null {
   if (!path) return null;
   const voice = path.match(/^chat\/voice\/([\w-]+)$/);
   if (voice) return { kind: 'voiceConversation', sessionId: voice[1] };
+  const skill = path.match(/^skills\/([a-z][a-z0-9_]*\.[a-z0-9_]+)$/);
+  if (skill) return { kind: 'skill', id: skill[1] };
   const chat = path.match(/^chat\/(\d+)$/);
   if (chat) return { kind: 'conversation', id: Number(chat[1]) };
   if (/^[\w-]+$/.test(path)) return { kind: 'screen', screen: path };

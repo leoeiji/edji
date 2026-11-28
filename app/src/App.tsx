@@ -17,6 +17,7 @@ import { ChatScreen } from '@/screens/ChatScreen';
 import { LogScreen } from '@/screens/LogScreen';
 import { PermissionsScreen } from '@/screens/PermissionsScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
+import { SkillsScreen } from '@/screens/SkillsScreen';
 import { useTheme } from '@/theme';
 
 export default function App() {
@@ -35,6 +36,7 @@ function Shell() {
   const update = useAppUpdate();
   const [current, setCurrent] = useState<string>(HOME.key);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [skillId, setSkillId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
   const openConversation = useCallback((id: number | null) => {
@@ -47,6 +49,10 @@ function Shell() {
     useCallback(
       async (link: DeepLink) => {
         if (link.kind === 'screen') return setCurrent(link.screen);
+        if (link.kind === 'skill') {
+          setSkillId(link.id);
+          return setCurrent('skills');
+        }
         if (link.kind === 'conversation') return openConversation(link.id);
         await ensureReady();
         const found = await findVoiceConversation(await getDb(), link.sessionId);
@@ -69,6 +75,7 @@ function Shell() {
     if (active.key === 'settings') return <SettingsScreen plugins={plugins} states={states} onStatesChanged={reload} update={update} />;
     if (active.key === 'permissions') return <PermissionsScreen />;
     if (active.key === 'log') return <LogScreen />;
+    if (active.key === 'skills') return <SkillsScreen selectedId={skillId} onSelect={setSkillId} />;
     const plugin = views.find((p) => p.id === active.key);
     const ctx = contexts[active.key];
     if (!plugin?.view || !ctx) return null;
@@ -92,7 +99,6 @@ function Shell() {
           activeConversationId={onChat ? conversationId : null}
           destinations={destinations.filter((d) => d.key !== HOME.key)}
           activeKey={onChat ? null : active.key}
-          dividerAt={views.length}
           onNewConversation={() => openConversation(null)}
           onOpenConversation={openConversation}
           onRename={async (id, title) => renameConversation(await getDb(), id, title)}
@@ -101,6 +107,7 @@ function Shell() {
             if (id === conversationId) setConversationId(null);
           }}
           onSelect={(key) => {
+            if (key === 'skills') setSkillId(null);
             setCurrent(key);
             setPanelOpen(false);
           }}

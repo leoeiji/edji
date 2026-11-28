@@ -47,6 +47,13 @@ export type Theme = {
   usageIn: string;
   usageCache: string;
   usageOut: string;
+  /** Skill origins: system, plugin and the user's own, each with its tint. */
+  skillSys: string;
+  skillSysBg: string;
+  skillPlugin: string;
+  skillPluginBg: string;
+  skillUser: string;
+  skillUserBg: string;
 };
 
 const light: Theme = {
@@ -79,6 +86,12 @@ const light: Theme = {
   usageIn: brand.pine,
   usageCache: '#A9C7B6',
   usageOut: '#3FA66B',
+  skillSys: '#3C4A9A',
+  skillSysBg: '#E7E9F8',
+  skillPlugin: '#8A5A00',
+  skillPluginBg: '#F8EBCF',
+  skillUser: '#0B6B45',
+  skillUserBg: '#E3F4E8',
 };
 
 const dark: Theme = {
@@ -110,6 +123,12 @@ const dark: Theme = {
   usageIn: brand.mint,
   usageCache: '#2B4A38',
   usageOut: '#2E8B57',
+  skillSys: '#A9B4FF',
+  skillSysBg: '#232749',
+  skillPlugin: '#F0C467',
+  skillPluginBg: '#3A2D10',
+  skillUser: brand.mint,
+  skillUserBg: '#17301F',
 };
 
 export function useTheme(): Theme {

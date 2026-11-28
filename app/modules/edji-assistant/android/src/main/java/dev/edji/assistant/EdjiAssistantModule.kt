@@ -83,8 +83,8 @@ class EdjiAssistantModule : Module() {
          * Portuguese ("Finanças · Registrar gasto"), [state] is `running`,
          * `done` or `failed`. Returns false once nobody is waiting.
          */
-        Function("pushTool") { id: Double, toolCallId: String, label: String, state: String ->
-            CommandInbox.get(context).tool(id.toLong(), toolCallId, label, state)
+        Function("pushTool") { id: Double, toolCallId: String, label: String, state: String, kind: String? ->
+            CommandInbox.get(context).tool(id.toLong(), toolCallId, label, state, kind ?: "tool")
         }
 
         /** The command's turn was saved as a conversation: the session offers "Abrir no Edji". */

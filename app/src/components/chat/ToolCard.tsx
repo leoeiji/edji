@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { ToolPart } from '@/agent/agent';
 import { formatDuration } from '@/core/chatView';
 import { toolLabel } from '@/core/registry';
 import { PLUGINS } from '@/plugins';
 import { useTheme } from '@/theme';
+import { SkillReadLine } from './SkillReadLine';
 
 type Props = { tool: ToolPart };
 
@@ -13,11 +14,25 @@ type Props = { tool: ToolPart };
  * technical name, the input as key/value pairs and the handler's reply.
  */
 export function ToolCard({ tool }: Props) {
+  // Reading a skill is a quiet line, not a card, and never shows the skill's text (ADR 0010).
+  if (tool.name === 'skills.load') return <SkillReadLine tool={tool} />;
+  return <ToolCardBody tool={tool} />;
+}
+
+/** Skills the agent wrote or deleted: shown tinted, with a link to the skill. */
+function skillWriteId(tool: ToolPart): string | null {
+  if (tool.name === 'skills.create') return tool.output?.match(/user\.[a-z0-9_]+/)?.[0] ?? null;
+  if (tool.name === 'skills.update') return typeof tool.input.id === 'string' ? tool.input.id : null;
+  return null;
+}
+
+function ToolCardBody({ tool }: Props) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   const failed = tool.state === 'failed';
   const [plugin, action] = splitLabel(toolLabel(PLUGINS, tool.name));
   const entries = Object.entries(tool.input);
+  const skillId = skillWriteId(tool);
 
   return (
     <Pressable
@@ -25,7 +40,7 @@ export function ToolCard({ tool }: Props) {
       accessibilityRole="button"
       accessibilityState={{ expanded: open }}
       accessibilityLabel={`${plugin} ${action}, ${STATE_LABEL[tool.state]}`}
-      style={[styles.card, { backgroundColor: failed ? t.dangerBg : t.toolBg, borderColor: t.line }]}
+      style={[styles.card, { backgroundColor: failed ? t.dangerBg : tool.name.startsWith('skills.') ? t.skillUserBg : t.toolBg, borderColor: t.line }]}
     >
       <View style={styles.row}>
         <StateMark state={tool.state} />
@@ -50,6 +65,11 @@ export function ToolCard({ tool }: Props) {
             </View>
           )}
           {tool.output !== undefined && <Text style={[styles.output, { color: t.text }]}>{tool.output}</Text>}
+          {skillId && tool.state === 'done' && (
+            <Pressable onPress={() => Linking.openURL(`edji://skills/${skillId}`)} accessibilityRole="link" hitSlop={8}>
+              <Text style={[styles.link, { color: t.skillUser }]}>Abrir skill</Text>
+            </Pressable>
+          )}
           {tool.output === undefined && tool.state !== 'running' && (
             <Text style={[styles.output, { color: t.muted }]}>Interrompida antes de terminar.</Text>
           )}
@@ -97,4 +117,5 @@ const styles = StyleSheet.create({
   kv: { borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, padding: 8, gap: 2 },
   mono: { fontFamily: 'monospace', fontSize: 12 },
   output: { fontSize: 14, lineHeight: 20 },
+  link: { fontSize: 13, fontWeight: '700' },
 });

@@ -39,7 +39,7 @@ class CommandInbox private constructor(context: Context) :
         val onProgress: (String) -> Unit,
         val onHeartbeat: () -> Unit,
         val onDone: (status: String, reply: String) -> Unit,
-        val onTool: (toolCallId: String, label: String, state: String) -> Unit = { _, _, _ -> },
+        val onTool: (toolCallId: String, label: String, state: String, kind: String) -> Unit = { _, _, _, _ -> },
         val onSaved: () -> Unit = {},
     )
 
@@ -131,10 +131,14 @@ class CommandInbox private constructor(context: Context) :
         return true
     }
 
-    /** Passes a tool call's progress to the waiting session; also a sign of life. False when nobody waits. */
-    fun tool(id: Long, toolCallId: String, label: String, state: String): Boolean {
+    /**
+     * Passes a tool call's progress to the waiting session; also a sign of
+     * life. [kind] is `skill` for a skill the agent read (the chip gets a book),
+     * anything else is a plain tool. False when nobody waits.
+     */
+    fun tool(id: Long, toolCallId: String, label: String, state: String, kind: String = "tool"): Boolean {
         val waiter = waiters[id] ?: return false
-        waiter.onTool(toolCallId, label, state)
+        waiter.onTool(toolCallId, label, state, kind)
         waiter.onHeartbeat()
         return true
     }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Conversation } from '@/core/chatStore';
 import { groupConversations } from '@/core/chatView';
-import type { Destination } from '@/navigation/destinations';
+import { AGENT_GROUP_TITLE, isFixed, type Destination } from '@/navigation/destinations';
 import { useTheme } from '@/theme';
 
 type Props = {
@@ -12,8 +12,6 @@ type Props = {
   /** Plugin views and fixed screens, below the conversations. */
   destinations: Destination[];
   activeKey: string | null;
-  /** Index before which a divider separates the plugin views from the fixed screens. */
-  dividerAt: number;
   onNewConversation(): void;
   onOpenConversation(id: number): void;
   onRename(id: number, title: string): void;
@@ -33,6 +31,7 @@ export function SidePanel(props: Props) {
   const t = useTheme();
   const [menu, setMenu] = useState<Menu | null>(null);
   const [draft, setDraft] = useState('');
+  const [agentOpen, setAgentOpen] = useState(props.destinations.some((d) => d.group === 'agent' && d.key === props.activeKey));
   const groups = groupConversations(props.conversations, Date.now());
 
   const item = (c: Conversation) => {
@@ -133,14 +132,50 @@ export function SidePanel(props: Props) {
             </View>
           ))}
           <View style={[styles.divider, { backgroundColor: t.line }]} />
-          {props.destinations.map((d, i) => (
-            <View key={d.key}>
-              {i === props.dividerAt && i > 0 && <View style={[styles.divider, { backgroundColor: t.line }]} />}
-              <Pressable onPress={() => props.onSelect(d.key)} style={[styles.item, d.key === props.activeKey && { backgroundColor: t.surface }]}>
-                <Text style={[styles.itemText, { color: d.key === props.activeKey ? t.accent : t.text }]}>{d.title}</Text>
-              </Pressable>
-            </View>
-          ))}
+          {props.destinations.map((d, i) => {
+            if (d.group === 'agent') {
+              // The whole group is drawn at its first item; the others are skipped.
+              if (props.destinations.findIndex((x) => x.group === 'agent') !== i) return null;
+              return (
+                <View key="agent-group">
+                  <Pressable
+                    onPress={() => setAgentOpen((v) => !v)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: agentOpen }}
+                    style={styles.item}
+                  >
+                    <Text style={[styles.itemText, { color: t.text }]}>{AGENT_GROUP_TITLE}</Text>
+                    <Text style={[styles.chevron, { color: t.muted }]}>{agentOpen ? '⌃' : '⌄'}</Text>
+                  </Pressable>
+                  {agentOpen && (
+                    <View style={[styles.sub, { borderLeftColor: t.line }]}>
+                      {props.destinations
+                        .filter((x) => x.group === 'agent')
+                        .map((x) => (
+                          <Pressable
+                            key={x.key}
+                            onPress={() => props.onSelect(x.key)}
+                            style={[styles.subItem, x.key === props.activeKey && { backgroundColor: t.surface }]}
+                          >
+                            <Text style={[styles.subText, { color: x.key === props.activeKey ? t.accent : t.text }]}>{x.title}</Text>
+                          </Pressable>
+                        ))}
+                    </View>
+                  )}
+                </View>
+              );
+            }
+            return (
+              <View key={d.key}>
+                {isFixed(d) && !isFixed(props.destinations[i - 1] ?? { key: '', title: '' }) && (
+                  <View style={[styles.divider, { backgroundColor: t.line }]} />
+                )}
+                <Pressable onPress={() => props.onSelect(d.key)} style={[styles.item, d.key === props.activeKey && { backgroundColor: t.surface }]}>
+                  <Text style={[styles.itemText, { color: d.key === props.activeKey ? t.accent : t.text }]}>{d.title}</Text>
+                </Pressable>
+              </View>
+            );
+          })}
         </ScrollView>
       </View>
     </View>
@@ -172,7 +207,11 @@ const styles = StyleSheet.create({
   menuButton: { paddingHorizontal: 8, paddingVertical: 6 },
   input: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 15 },
   confirm: { fontSize: 14, lineHeight: 20, paddingHorizontal: 4 },
-  item: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
-  itemText: { fontSize: 17, fontWeight: '700' },
+  item: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
+  itemText: { flex: 1, fontSize: 17, fontWeight: '700' },
+  chevron: { fontSize: 16, width: 20, textAlign: 'center' },
+  sub: { marginLeft: 18, paddingLeft: 8, borderLeftWidth: 2, marginBottom: 4 },
+  subItem: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10 },
+  subText: { fontSize: 15, fontWeight: '600' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 10, marginHorizontal: 12 },
 });

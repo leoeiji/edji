@@ -52,6 +52,22 @@ describe('registry', () => {
     expect(() => validatePlugins([routines])).toThrow("routines tools can't be routine actions");
   });
 
+  it('reserves the ids of the skill origins and tools', () => {
+    for (const id of ['skills', 'system', 'user']) expect(() => validatePlugins([{ ...todo, id }])).toThrow('reserved');
+  });
+
+  it('checks plugin skills: unique ids and filled text', () => {
+    const skill = { id: 'analyze', name: 'Analisar', when: 'Quando pedir.', instructions: 'Passos.' };
+    expect(() => validatePlugins([{ ...todo, skills: [skill] }])).not.toThrow();
+    expect(() => validatePlugins([{ ...todo, skills: [skill, skill] }])).toThrow('Duplicate skill "todo.analyze"');
+    expect(() => validatePlugins([{ ...todo, skills: [{ ...skill, id: 'Analisar' }] }])).toThrow('Invalid skill id');
+    expect(() => validatePlugins([{ ...todo, skills: [{ ...skill, when: ' ' }] }])).toThrow('needs a name');
+  });
+
+  it('labels the core skill tools', () => {
+    expect(toolLabel([], 'skills.load')).toBe('Skills · Ler skill');
+  });
+
   it('requires migrations numbered from 1 without gaps', () => {
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 2, sql: '' }] }])).toThrow('numbered');
     expect(() => validatePlugins([{ ...todo, migrations: [{ version: 1, sql: '' }, { version: 2, sql: '' }] }])).not.toThrow();

@@ -1,4 +1,5 @@
 import type { Plugin, Tool } from './plugin';
+import { RESERVED_PLUGIN_IDS, skillToolLabel } from './skills/types';
 
 /** Enabled flag per plugin id, as stored. Missing ids fall back to the plugin default. */
 export type PluginStates = Record<string, boolean>;
@@ -29,7 +30,7 @@ export async function applyEnabledStates(plugins: Plugin[], states: PluginStates
 
 /**
  * Checks the plugin list at startup: unique ids, tool names namespaced with
- * the plugin id and unique, with a label, routine actions with flat parameters and never
+ * the plugin id and unique, with a label, skills with unique ids and text, ids not reserved, routine actions with flat parameters and never
  * from `routines`, migrations in increasing order. Throws on error.
  */
 export function validatePlugins(plugins: Plugin[]): void {
@@ -37,6 +38,7 @@ export function validatePlugins(plugins: Plugin[]): void {
   const tools = new Set<string>();
   for (const p of plugins) {
     if (!/^[a-z][a-z0-9_]*$/.test(p.id)) throw new Error(`Invalid plugin id "${p.id}"`);
+    if (RESERVED_PLUGIN_IDS.includes(p.id)) throw new Error(`Plugin id "${p.id}" is reserved`);
     if (ids.has(p.id)) throw new Error(`Duplicate plugin id "${p.id}"`);
     ids.add(p.id);
     for (const t of p.tools ?? []) {
@@ -53,6 +55,15 @@ export function validatePlugins(plugins: Plugin[]): void {
         }
       }
     }
+    const skillIds = new Set<string>();
+    for (const s of p.skills ?? []) {
+      if (!/^[a-z][a-z0-9_]*$/.test(s.id)) throw new Error(`Invalid skill id "${p.id}.${s.id}"`);
+      if (skillIds.has(s.id)) throw new Error(`Duplicate skill "${p.id}.${s.id}"`);
+      skillIds.add(s.id);
+      if (!s.name.trim() || !s.when.trim() || !s.instructions.trim()) {
+        throw new Error(`Skill "${p.id}.${s.id}" needs a name, a "when" and instructions`);
+      }
+    }
     const versions = (p.migrations ?? []).map((m) => m.version);
     versions.forEach((v, i) => {
       if (v !== i + 1) throw new Error(`Plugin "${p.id}" migrations must be numbered 1, 2, 3...`);
@@ -65,6 +76,8 @@ export function validatePlugins(plugins: Plugin[]): void {
  * tool that no longer exists (plugin removed) shows its technical name.
  */
 export function toolLabel(plugins: Plugin[], name: string): string {
+  const skill = skillToolLabel(name);
+  if (skill) return skill;
   for (const p of plugins) {
     const t = p.tools?.find((x) => x.name === name);
     if (t) return `${p.name} · ${t.label}`;

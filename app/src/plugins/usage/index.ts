@@ -11,5 +11,5 @@ export const usagePlugin: Plugin = {
   name: 'Uso',
   version: '1',
   enabledByDefault: true,
-  view: { title: 'Uso', Component: UsageView },
+  view: { title: 'Uso', group: 'agent', Component: UsageView },
 };
