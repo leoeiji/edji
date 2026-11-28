@@ -6,6 +6,7 @@ import { fallbackTitle } from '@/agent/light';
 import { CHAT_MIGRATIONS, CHAT_SCHEMA_ID, createConversation, findVoiceConversation, savesVoiceConversations } from './chatStore';
 import { runPersistedTurn, titleConversation } from './chatTurn';
 import { emitChanged } from './events';
+import { USAGE_MIGRATIONS, USAGE_SCHEMA_ID, usageRecorder } from './usage';
 import { openRouterModel } from '@/agent/openrouter';
 import type { PluginContext, Tool } from './plugin';
 import { availableTools, enabledPlugins, toolLabel, validatePlugins } from './registry';
@@ -19,6 +20,7 @@ export function ensureReady(): Promise<void> {
     validatePlugins(PLUGINS);
     const db = await getDb();
     await applyMigrations(db, CHAT_SCHEMA_ID, CHAT_MIGRATIONS);
+    await applyMigrations(db, USAGE_SCHEMA_ID, USAGE_MIGRATIONS);
     await migratePlugins(db, PLUGINS);
   })();
   return ready;
@@ -135,14 +137,25 @@ async function answer(c: PendingCommand): Promise<Answer> {
       const conversation =
         (await findVoiceConversation(db, c.sessionId)) ??
         (await createConversation(db, { title: fallbackTitle(c.text), origin: 'voice', voiceSessionId: c.sessionId }));
-      const result = await runPersistedTurn({ db, conversationId: conversation.id, userText: c.text, settings, ...live });
+      const result = await runPersistedTurn({
+        db,
+        conversationId: conversation.id,
+        userText: c.text,
+        settings,
+        source: 'voice',
+        voiceSessionId: c.sessionId,
+        ...live,
+      });
       assistant.markSaved(c.id);
       return {
         result,
         afterReply: () => titleConversation(db, conversation, c.text, result, { settings, createModel: openRouterModel }),
       };
     }
-    return { result: await runAgent({ messages: messagesFor(c), settings, ...live }) };
+    const usage = usageRecorder(db, { source: 'voice', voiceSessionId: c.sessionId ?? null });
+    const result = await runAgent({ messages: messagesFor(c), settings, onStep: usage.onStep, ...live });
+    await usage.flush();
+    return { result };
   } finally {
     clearInterval(poll);
   }
@@ -187,13 +200,16 @@ async function runRoutines(): Promise<number> {
     } else {
       agent ??= Promise.all([loadModelSettings(), agentTools((t) => t.routineAction === true)]);
       const [settings, tools] = await agent;
+      const usage = usageRecorder(await getDb(), { source: 'routine' });
       const result = await runAgent({
         messages: [{ role: 'user', content: run.prompt }],
         settings,
         tools,
         instructions: ROUTINE_INSTRUCTIONS,
         createModel: openRouterModel,
+        onStep: usage.onStep,
       });
+      await usage.flush();
       report = routineReport(run, result);
     }
     await EdjiAssistant.completeRoutineRun(run.id, report.outcome, report.detail, report.notifyText);

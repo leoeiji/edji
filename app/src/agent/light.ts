@@ -1,4 +1,6 @@
 import { generateText, type LanguageModel } from 'ai';
+import { stepCallbacks } from './agent';
+import type { StepMetrics } from './metrics';
 import type { ModelSettings } from './settings';
 
 export type LightDeps = {
@@ -6,6 +8,8 @@ export type LightDeps = {
   /** Builds the model; injected in tests. */
   createModel(apiKey: string, model: string): LanguageModel;
   signal?: AbortSignal;
+  /** Metrics of the call, as [runAgent]'s `onStep` (ADR 0008). */
+  onStep?(metrics: StepMetrics): void;
 };
 
 /**
@@ -23,6 +27,7 @@ export async function runLight(deps: LightDeps, instructions: string, prompt: st
       prompt,
       maxRetries: 1,
       abortSignal: deps.signal,
+      ...stepCallbacks(deps.onStep),
     });
     return text.trim() || null;
   } catch {

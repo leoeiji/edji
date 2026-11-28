@@ -4,6 +4,7 @@ import { runAgent, type AgentResult, type AgentTool, type AssistantPart, type To
 import { generateTitle } from '@/agent/light';
 import type { ModelSettings } from '@/agent/settings';
 import { addMessage, historyFor, loadMessages, savePart, setMessageStatus, settleTitle, type Conversation, type MessageStatus } from './chatStore';
+import { recordStep, usageRecorder } from './usage';
 
 /** How often a growing text is written to the database while it streams. */
 export const TEXT_SAVE_MS = 250;
@@ -25,6 +26,9 @@ export type TurnInput = {
   onText?(textSoFar: string): void;
   onActivity?(): void;
   onToolEvent?(event: ToolEvent): void;
+  /** Where the turn's model steps are counted (ADR 0008): the text chat, or a voice session with its id. */
+  source?: 'chat' | 'voice';
+  voiceSessionId?: string | null;
   now?(): number;
 };
 
@@ -72,6 +76,11 @@ export async function runPersistedTurn(input: TurnInput): Promise<TurnResult> {
     tools: input.tools,
     signal: input.signal,
     onActivity: input.onActivity,
+    onStep: (m) => {
+      const at = now();
+      const origin = { source: input.source ?? 'chat', conversationId, messageId, voiceSessionId: input.voiceSessionId ?? null };
+      write(() => recordStep(db, origin, m, at));
+    },
     onText: (full) => {
       const text = full.slice(consumed);
       if (openText === null) {
@@ -139,5 +148,8 @@ export async function titleConversation(
   deps: { settings: ModelSettings; createModel(apiKey: string, model: string): LanguageModel },
 ): Promise<void> {
   if (conversation.titleStatus !== 'pending' || result.status !== 'done') return;
-  await settleTitle(db, conversation.id, await generateTitle(userText, result.reply, deps));
+  const usage = usageRecorder(db, { source: 'title', conversationId: conversation.id });
+  const title = await generateTitle(userText, result.reply, { ...deps, onStep: usage.onStep });
+  await usage.flush();
+  await settleTitle(db, conversation.id, title);
 }
